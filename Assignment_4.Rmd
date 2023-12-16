@@ -12,6 +12,68 @@ neighborhoods_url <- "https://data.police.uk/api/leicestershire/neighbourhoods"
 fromJSON(neighborhoods_url)
 ```
 
+```{r}
+library(httr)
+
+practice_url <- GET("https://data.police.uk/api/stops-at-location?location_id=NC04&date=2017-01")
+
+practice_url$content
+```
+```{r}
+ukc_neighbourhoods("dorset")
+
+poly_df_4 <- data.frame(
+  lat = c(52.268, 52.794, 52.130, 52.000),
+  long = c(0.543, 0.238, 0.478, 0.400)
+)
+
+uk<- st_as_sf(ne_countries(geounit = "england", type = "map_units"))
+
+plot(uk["geometry"])
+```
+
+
+
+```{r}
+library(ukpolice)
+
+library(rnaturalearth)
+library(sf)
+
+# Download a shapefile from the London Government website:
+url_dl <- "https://data.london.gov.uk/download/statistical-gis-boundary-files-london/9ba8c833-6370-4b11-abdc-314aa020d5e0/statistical-gis-boundaries-london.zip"
+
+file_name_dl <- "statistical-gis-boundaries-london.zip"
+file_path_dl <- "data/"
+
+download.file(url_dl, paste0(file_path_dl, file_name_dl), mode = "wb")
+
+# Unzip file: because the file is a collection of files
+unzip(paste0(file_path_dl, file_name_dl),exdir=paste0(file_path_dl,"shapefiles"))
+
+# Read the shapefile:
+shp <- st_read("data/shapefiles/statistical-gis-boundaries-london/ESRI/LSOA_2011_London_gen_MHW.shp")
+
+View(shp)
+```
+
+```{r}
+install.packages("sf")
+library(sf)
+
+# Create a matrix from the lat and long columns
+coords <- cbind(poly_df_4$long, poly_df_4$lat)
+
+# Create a polygon using the matrix
+polygon <- st_polygon(list(coords))
+
+# Create an sf (simple features) object
+poly_sf <- st_sf(geometry = st_sfc(polygon))
+
+plot(poly_sf, main = "Geographic Area Representation")
+
+```
+
 
 ```{r setup, include=FALSE} 
 # this chunk contains code that sets global options for the entire .Rmd. 
