@@ -4,42 +4,32 @@ date: "January 10, 2024"
 output: html_document
 ---
 
-```{r}
-library("jsonlite")
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(echo = FALSE)
 
-neighborhoods_url <- "https://data.police.uk/api/leicestershire/neighbourhoods"
-
-fromJSON(neighborhoods_url)
-```
-
-```{r}
-library(httr)
-
-practice_url <- GET("https://data.police.uk/api/stops-at-location?location_id=NC04&date=2017-01")
-
-practice_url$content
-```
-```{r}
-ukc_neighbourhoods("dorset")
-
-poly_df_4 <- data.frame(
-  lat = c(52.268, 52.794, 52.130, 52.000),
-  long = c(0.543, 0.238, 0.478, 0.400)
-)
-
-uk<- st_as_sf(ne_countries(geounit = "england", type = "map_units"))
-
-plot(uk["geometry"])
-```
-
-
-
-```{r}
+library(dplyr)
 library(ukpolice)
-
 library(rnaturalearth)
 library(sf)
+```
 
+```{r get_stop_search}
+england <- st_as_sf(ne_countries(geounit = "england", type = "map_units"))
+
+england_stop_search <- ukc_stop_search_poly(england["geometry"])
+
+london_stop_search <- ukc_stop_search_poly(london_geometry)
+
+england_stop_search_processed <- transform(england_stop_search, 
+                                           longitude = as.numeric(longitude), 
+                                           latitude = as.numeric(latitude))
+
+england_stop_search_points <- st_as_sf(test_numeric, coords = c("longitude", "latitude"),crs=4326)
+```
+
+
+
+```{r get_shp_file}
 # Download a shapefile from the London Government website:
 url_dl <- "https://data.london.gov.uk/download/statistical-gis-boundary-files-london/9ba8c833-6370-4b11-abdc-314aa020d5e0/statistical-gis-boundaries-london.zip"
 
@@ -52,37 +42,31 @@ download.file(url_dl, paste0(file_path_dl, file_name_dl), mode = "wb")
 unzip(paste0(file_path_dl, file_name_dl),exdir=paste0(file_path_dl,"shapefiles"))
 
 # Read the shapefile:
-shp <- st_read("data/shapefiles/statistical-gis-boundaries-london/ESRI/LSOA_2011_London_gen_MHW.shp")
+london <- read_sf("data/shapefiles/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp") %>%
+  st_transform(4326)
+london_union <- st_union(london)
 
-View(shp)
+london_geometry<-st_as_sf(london_union)
+class(london_geometry)
 ```
 
-```{r}
-install.packages("sf")
-library(sf)
+```{r filter_points}
+# Filter stop-and-search points in England based on their intersection with London's boundaries.
+stop_and_search <- st_intersects(london_union, england_stop_search_points)
 
-# Create a matrix from the lat and long columns
-coords <- cbind(poly_df_4$long, poly_df_4$lat)
-
-# Create a polygon using the matrix
-polygon <- st_polygon(list(coords))
-
-# Create an sf (simple features) object
-poly_sf <- st_sf(geometry = st_sfc(polygon))
-
-plot(poly_sf, main = "Geographic Area Representation")
-
+# Subset the original set of points to include only those that intersect with London.
+uk_points_test <- uk_points[unlist(stop_and_search), ]
 ```
 
 
-```{r setup, include=FALSE} 
-# this chunk contains code that sets global options for the entire .Rmd. 
-# we use include=FALSE to suppress it from the top of the document, but it will still appear in the appendix. 
+```{r vis}
+vis <- tm_shape(london_union) + 
+  tm_borders()
 
-knitr::opts_chunk$set(echo = FALSE) # actually set the global chunk options. 
-# we set echo=FALSE to suppress code such that it by default does not appear throughout the document. 
-# note: this is different from .Rmd default
+vis <- vis + tm_shape(uk_points_test) +
+  tm_bubbles(size=0.2, alpha =0.5)
 ```
+
 
 This document contains the necessary commands and layout to meet the formatting requirements for MY472. You should use the template.Rmd file as the basis for your own answers to the assigned exercises.
 
