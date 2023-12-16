@@ -11,12 +11,17 @@ library(dplyr)
 library(ukpolice)
 library(rnaturalearth)
 library(sf)
+library(tmap)
 ```
 
 ```{r get_stop_search}
 england <- st_as_sf(ne_countries(geounit = "england", type = "map_units"))
 
-england_stop_search <- ukc_stop_search_poly(england["geometry"])
+library(httr)    
+set_config(use_proxy(url="10.3.100.207",port=8080))
+#options(timeout = 20000)
+#getOption('timeout')
+#england_stop_search <- ukc_stop_search_poly(england["geometry"])
 
 london_stop_search <- ukc_stop_search_poly(london_geometry)
 
@@ -25,6 +30,12 @@ england_stop_search_processed <- transform(england_stop_search,
                                            latitude = as.numeric(latitude))
 
 england_stop_search_points <- st_as_sf(test_numeric, coords = c("longitude", "latitude"),crs=4326)
+```
+```{r}
+sessionInfo()
+install.packages("curl")
+library(curl)
+response <- curl::curl_fetch_memory("http://cran.r-project.org/Rlogo.jpg")
 ```
 
 
@@ -47,7 +58,6 @@ london <- read_sf("data/shapefiles/statistical-gis-boundaries-london/ESRI/London
 london_union <- st_union(london)
 
 london_geometry<-st_as_sf(london_union)
-class(london_geometry)
 ```
 
 ```{r filter_points}
@@ -55,7 +65,7 @@ class(london_geometry)
 stop_and_search <- st_intersects(london_union, england_stop_search_points)
 
 # Subset the original set of points to include only those that intersect with London.
-uk_points_test <- uk_points[unlist(stop_and_search), ]
+uk_points <- england_stop_search_points[unlist(stop_and_search), ]
 ```
 
 
