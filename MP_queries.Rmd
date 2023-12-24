@@ -9,33 +9,133 @@ output: html_document
 knitr::opts_chunk$set(echo = FALSE) # actually set the global chunk options. 
 library("jsonlite")
 library("tidyverse")
+library("DBI")
+library("RSQLite")
 ```
+
+```{r}
+get_qs <- function(endpoint_url, n_skip = 0) {
+  url <- paste0(
+    endpoint_url,
+    "?parameters.skip=",
+    n_skip,
+    "&parameters.take=100")
+
+  response <-
+    GET(url) |>
+    content("parsed")
+
+  return(response)
+}
+
+pull_all_written_qs <- function(url){
+
+  # Calculate how many questions are in the end point
+  n_resp <- GET(url) |>
+    content(as = "text")
+  n <- n_resp$totalResults
+
+
+  # Questions can be pulled in batches of 100,
+  # calculate how many time we will have to pull
+  n_loops <- ceiling(n / 100)
+
+  print(paste0("Written Qs started at ", Sys.time()))
+
+  for (i in 1:n_loops) {
+
+    n_skip <- (i - 1) * 100 # Skip however many 100s the loop has run
+
+    if (i == 1) { # On first iteration, make new list
+
+      response <- get_qs(endpoint_url, n_skip)
+      response <- response$results
+
+    } else { # On all other iterations, append to existing list
+
+      response_new <- get_qs(endpoint_url, n_skip)
+      response_new <- response_new$results
+      response <- c(response, response_new) # Merge responses
+
+    }
+
+    print(paste0(i, " of ", n_loops, " done.")) # Print progress message
+    Sys.sleep(1) # Sleep to avoid hammering the API 
+
+  }
+
+  print(paste0("Written Qs done at ", Sys.time()))
+  return(response)
+}
+
+written_questions <- pull_all_written_qs(
+  "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-01-02&answered=Any&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons")
+
+for (i in seq_along(written_questions)){
+  print(written_questions[[i]]$value$askingMember)
+}
+
+```
+
+
 
 ```{r}
 library("jsonlite")
 answering_bodies_json <- fromJSON("https://members-api.parliament.uk/api/Reference/AnsweringBodies")
 View(answering_bodies_json)
 
-written_questions <- fromJSON('https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-12-31&answered=Any&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons')
+written_questions <- fromJSON('https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-01-02&answered=Any&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons')
 
-written_questions$results
+str(written_questions$results)
 
-written_questions_get <- GET('https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-12-31&answered=Any&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons')
+written_questions_get <- GET('https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-01-02&answered=Any&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons')
 
+for (i in seq_along(written_questions_get$results)){
+  print(written_questions_get$results[[i,]])
+}
 
-written_questions_parsed <- content(written_questions_get, "parsed")
+written_questions_parsed <- content(written_questions_get, "parsed") #httr
 
-str(written_questions_parsed$results)
+written_questions_parsed$results[[1]]$value$askingMemberId
 
-written_questions_tibble <- do.call(rbind, lapply(written_questions_parsed$results, as_tibble, stringsAsFactors = FALSE))
+for (i in seq_along(written_questions_parsed$results)){
+  print(written_questions_parsed$results[[i]]$value$askingMember$name)
+}
 
+summary(written_questions_parsed$results)
 
+summary(written_questions_parsed$results[[1]])
 
-written_questions_tibble %>% 
-  pivot_longer(everything()) %>% 
-  mutate(value = map(value, `length<-`, max(lengths(value)))) %>% 
-  pivot_wider(names_from = name, values_from = value) %>% 
-  unnest(everything())
+summary(written_questions_parsed[[2]][[1]][[1]])
+
+written_questions_parsed[[2]][[1]][[1]][[3]]
+
+written_questions_parsed[[2]][[1]][[1]]
+
+flattened_list <- purrr::flatten(written_questions_parsed[[2]][[1]][[1]])
+
+df <- as.data.frame(flattened_list)
+
+View(df)
+
+unlisted <- unlist(flattened_list)
+
+df <- tibble(value = unlisted)
+
+df <- tidyr::unnest_wider(df, cols = everything())
+
+written_questions_tibble <- do.call(rbind, lapply(written_questions_parsed[[2]][[1]][[1]], as_tibble, stringsAsFactors = FALSE))
+
+df <- as.data.frame(t(unlist(written_questions_parsed[[2]][[1]][[1]][[3]])))
+
+filtered_list <- keep(written_questions_parsed[[2]][[1]][[1]], ~length(.x) == 1)
+
+filtered_unlisted <- unlist(filtered_list)
+
+df <- enframe(filtered_unlisted) %>%
+  spread(name, value)
+
+df_filtered <- tibble(value = filtered_unlisted)
 ```
 
 
