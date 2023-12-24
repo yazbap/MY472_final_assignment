@@ -1,80 +1,43 @@
 ---
-title: "Assignment 4"
-date: "January 10, 2024"
+title: "Assignment Template"
+author: "Dr Thomas Robinson and Dr Dan de Kadt"
+date: "AT 2023"
 output: html_document
 ---
 
 ```{r setup, include=FALSE} 
-knitr::opts_chunk$set(echo = FALSE)
-
-library(dplyr)
-library(ukpolice)
-library(rnaturalearth)
-library(sf)
-library(tmap)
+knitr::opts_chunk$set(echo = FALSE) # actually set the global chunk options. 
+library("jsonlite")
+library("tidyverse")
 ```
 
-```{r get_stop_search}
-england <- st_as_sf(ne_countries(geounit = "england", type = "map_units"))
+```{r}
+library("jsonlite")
+answering_bodies_json <- fromJSON("https://members-api.parliament.uk/api/Reference/AnsweringBodies")
+View(answering_bodies_json)
 
-library(httr)    
-set_config(use_proxy(url="10.3.100.207",port=8080))
-options(timeout = 20000)
+written_questions <- fromJSON('https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-12-31&answered=Any&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons')
 
-#england_stop_search <- ukc_stop_search_poly(england["geometry"])
+written_questions$results
 
-poly_df_4 <- data.frame(
-  lat = c(52.268, 52.794, 52.130, 52.000),
-  long = c(0.543, 0.238, 0.478, 0.400)
-)
+written_questions_get <- GET('https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-12-31&answered=Any&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons')
 
-london_stop_search <- ukc_stop_search_poly(poly_df_4)
 
-#england_stop_search_processed <- transform(england_stop_search, 
-                                           #longitude = as.numeric(longitude), 
-                                           #latitude = as.numeric(latitude))
+written_questions_parsed <- content(written_questions_get, "parsed")
 
-#england_stop_search_points <- st_as_sf(test_numeric, coords = c("longitude", "latitude"),crs=4326)
+str(written_questions_parsed$results)
+
+written_questions_tibble <- do.call(rbind, lapply(written_questions_parsed$results, as_tibble, stringsAsFactors = FALSE))
+
+
+
+written_questions_tibble %>% 
+  pivot_longer(everything()) %>% 
+  mutate(value = map(value, `length<-`, max(lengths(value)))) %>% 
+  pivot_wider(names_from = name, values_from = value) %>% 
+  unnest(everything())
 ```
 
-
-
-```{r get_shp_file}
-# Download a shapefile from the London Government website:
-url_dl <- "https://data.london.gov.uk/download/statistical-gis-boundary-files-london/9ba8c833-6370-4b11-abdc-314aa020d5e0/statistical-gis-boundaries-london.zip"
-
-file_name_dl <- "statistical-gis-boundaries-london.zip"
-file_path_dl <- "data/"
-
-download.file(url_dl, paste0(file_path_dl, file_name_dl), mode = "wb")
-
-# Unzip file: because the file is a collection of files
-unzip(paste0(file_path_dl, file_name_dl),exdir=paste0(file_path_dl,"shapefiles"))
-
-# Read the shapefile:
-london <- read_sf("data/shapefiles/statistical-gis-boundaries-london/ESRI/London_Borough_Excluding_MHW.shp") %>%
-  st_transform(4326)
-london_union <- st_union(london)
-
-london_geometry<-st_as_sf(london_union)
-```
-
-```{r filter_points}
-# Filter stop-and-search points in England based on their intersection with London's boundaries.
-stop_and_search <- st_intersects(london_union, england_stop_search_points)
-
-# Subset the original set of points to include only those that intersect with London.
-uk_points <- england_stop_search_points[unlist(stop_and_search), ]
-```
-
-
-```{r vis}
-vis <- tm_shape(london_union) + 
-  tm_borders()
-
-vis <- vis + tm_shape(uk_points_test) +
-  tm_bubbles(size=0.2, alpha =0.5)
-```
 
 
 This document contains the necessary commands and layout to meet the formatting requirements for MY472. You should use the template.Rmd file as the basis for your own answers to the assigned exercises.
