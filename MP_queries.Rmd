@@ -14,13 +14,98 @@ library("RSQLite")
 ```
 
 ```{r}
-get_data <- function(base_url, skip_records, take_records){
-  url <- paste0(base_url, skip_records, take_records)
+get_data <- function(url){
   data<- GET(url)
   
   data_parsed <- content(data, "parsed")
   
   return(data_parsed)
+}
+
+create_written_df_row <- function(element){
+  new_row <- tibble(
+    question_id = element$value$id,
+    asking_member_id = element$value$askingMember$id,  
+    asking_member_name = element$value$askingMember$name,
+    asking_member_party = element$AskingMember$Party,
+    answering_body_name = element$value$answeringBodyName
+  )
+  return(new_row)
+}
+
+create_oral_df_row <- function(element){
+  new_row <- tibble(
+    question_id = element$Id,
+    asking_member_id = element$AskingMemberId,  
+    asking_member_name = element$AskingMember$Name,
+    asking_member_party = element$AskingMember$Party,
+    answering_body_name = element$AnsweringBody
+  )
+  return(new_row)
+}
+
+get_written_data <- function(base_url, skip_records, take_records){
+  url <- paste0(base_url, skip_records, take_records) #construct first request
+  
+  written_data <- get_data(url) #get first request
+  
+  written_list <- list() #create a new list
+  
+  written_list <- append(written_list, written_data$results) #append first request to the list
+  
+  num_requests <- ceiling(written_data$totalResults / 100) #calculate number of requests needed
+  
+  for (i in 1:num_requests){ #for each request in num_requests
+    
+    cat("Getting request ", i, " out of ", num_requests, "\n") #update user
+    
+    skip_records <- skip_records + 100 #update the skip number
+    
+    url <- paste0(base_url, skip_records, take_records) #update the url
+    
+    written_data <- get_data(url) #get current request
+    
+    written_list <- append(written_list, written_data$results) #append current request to the list
+    
+    #add a pause
+    Sys.sleep(2)
+  }
+  
+  results <- map_df(written_list, create_written_df_row) #construct df with needed data
+  
+  return(results)
+}
+
+get_oral_data <- function(base_url, skip_records, take_records){
+  url <- paste0(base_url, skip_records, take_records) #construct first request
+  
+  oral_data <- get_data(url) #get first request
+  
+  oral_list <- list() #create a new list
+  
+  oral_list <- append(oral_list, oral_data$Response) #append first request to the list
+
+  num_requests <- ceiling(oral_data$PagingInfo$GlobalTotal / 100) #calculate number of requests needed
+  
+  for (i in 1:num_requests){ #for each request in num_requests
+    
+    cat("Getting request ", i, " out of ", num_requests, "\n") #update user
+    
+    skip_records <- skip_records + 100 #update the skip number
+    
+    url <- paste0(base_url, skip_records, take_records) #update the url
+    
+    oral_data <- get_data(url) #get current request
+    
+    oral_list <- append(oral_list, oral_data$Response) #append current request to the list
+    
+    #add a pause
+    Sys.sleep(2)
+  }
+  
+  results <- map_df(oral_list, create_oral_df_row) #construct df with needed data
+  
+  return(results)
 }
 ```
 
@@ -35,127 +120,26 @@ skip_records <- 0
 #set_take_records
 take_records <- '&take=100'
 
-#perform the first request
-written_data <- get_data(base_url, 
-                         skip_records, 
-                         take_records)
+written_df <- get_written_data(base_url,skip_records,take_records)
 
-#create a new list
-written_list <- list()
-
-written_list <- append(results_list, written_data$results)
-
-#calculate the number of times we are going to need to make the request by using totalResults
-#set this number as num_requests
-num_requests <- ceiling(written_data$totalResults / 100)
-
-#for each request in num_requests
-for (i in 1:num_requests){
-  
-  #update user
-  cat("Getting request ", i, " out of ", num_requests)
-  
-  #update the skip number
-  skip_records <- skip_records + 100
-  
-  #update the url
-  written_data <- get_data(base_url,
-                           skip_records, 
-                           take_records)
-  
-  written_list <- append(written_list, written_data$results)
-  #add a pause
-  Sys.sleep(2)
-}
-
-#construct the master df
-
-written_df <- tibble(question_id = as.character(), 
-                     asking_member_id = as.integer(),
-                     asking_member_name = as.character(),
-                     asking_member_party = as.character(),
-                     asking_member_from = as.character(),
-                     member_has_interest = as.character(),
-                     answering_body_name = as.character())
-
-for (i in seq_along(written_list)){ 
-  # Create a new row
-  new_row <- tibble(
-    question_id = written_list[[i]]$value$id,
-    asking_member_id = written_list[[i]]$value$askingMember$id,  
-    asking_member_name = written_list[[i]]$value$askingMember$name,
-    asking_member_party = written_list[[i]]$value$askingMember$party,
-    asking_member_from = written_list[[i]]$value$askingMember$memberFrom,
-    answering_body_name = written_list[[i]]$value$answeringBodyName
-  )
-  
-  # Append the new row to the dataframe
-  written_df <- rbind(written_df, new_row)
-
-}
-```
-
-```{r}
 base_url <- 'https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2022-01-01&parameters.answeringDateEnd=2022-01-31&parameters.answeringBodyIds=17&parameters.answeringBodyIds=14&parameters.answeringBodyIds=214&parameters.answeringBodyIds=202&parameters.answeringBodyIds=29&parameters.skip='
 
 skip_records <- 0
 
 take_records <- '&parameters.take=100'
 
-oral_data <- get_data(base_url,
-                      skip_records,
-                      take_records)
+oral_df <- get_oral_data(base_url,skip_records,take_records)
 
-#create a new list
-oral_list <- list()
+all_qs <- rbind(written_df, oral_df)
 
-oral_list <- append(results_list, oral_data$results)
-
-#calculate the number of times we are going to need to make the request by using totalResults
-#set this number as num_requests
-num_requests <- ceiling(oral_data$PagingInfo$GlobalTotal / 100)
-
-for (i in 1:num_requests){
-  
-  #update user
-  cat("Getting request ", i, " out of ", num_requests)
-  
-  #update the skip number
-  skip_records <- skip_records + 100
-  
-  #update the url
-  oral_data <- get_data(base_url,
-                        skip_records,
-                        take_records)
-  
-  oral_list <- append(oral_list, oral_data$Response)
-  #add a pause
-  Sys.sleep(2)
-}
-
-#construct the master df
-
-for (i in seq_along(oral_list)){ 
-  # Create a new row
-  new_row <- tibble(
-    question_id = oral_list[[i]]$value$id,
-    asking_member_id = oral_list[[i]]$value$askingMember$id,  
-    asking_member_name = oral_list[[i]]$value$askingMember$name,
-    asking_member_party = oral_list[[i]]$value$askingMember$party,
-    asking_member_from = oral_list[[i]]$value$askingMember$memberFrom,
-    answering_body_name = oral_list[[i]]$value$answeringBodyName
-  )
-  
-  # Append the new row to the dataframe
-  written_df <- rbind(written_df, new_row)
-
-}
 ```
 
 ```{r}
 #gender
 #where they are from
 ```
+
+
 
 
 
