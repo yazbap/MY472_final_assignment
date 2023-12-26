@@ -41,9 +41,9 @@ written_data <- get_data(base_url,
                          take_records)
 
 #create a new list
-results_list <- list()
+written_list <- list()
 
-results_list <- append(results_list, written_data$results)
+written_list <- append(results_list, written_data$results)
 
 #calculate the number of times we are going to need to make the request by using totalResults
 #set this number as num_requests
@@ -59,17 +59,14 @@ for (i in 1:num_requests){
   skip_records <- skip_records + 100
   
   #update the url
-  written_data <- get_data(base_url, 
-                                     skip_records, 
-                                     take_records,
-                                     written_questions_list)
+  written_data <- get_data(base_url,
+                           skip_records, 
+                           take_records)
   
-  results_list <- append(results_list, written_data$results)
+  written_list <- append(written_list, written_data$results)
   #add a pause
   Sys.sleep(2)
 }
-
-print(results_list)
 
 #construct the master df
 
@@ -81,22 +78,81 @@ written_df <- tibble(question_id = as.character(),
                      member_has_interest = as.character(),
                      answering_body_name = as.character())
 
-for (i in seq_along(results_list)){ 
+for (i in seq_along(written_list)){ 
   # Create a new row
   new_row <- tibble(
-    question_id = results_list[[i]]$value$id,
-    asking_member_id = results_list[[i]]$value$askingMember$id,  
-    asking_member_name = results_list[[i]]$value$askingMember$name,
-    asking_member_party = results_list[[i]]$value$askingMember$party,
-    asking_member_from = results_list[[i]]$value$askingMember$memberFrom,
-    answering_body_name = results_list[[i]]$value$answeringBodyName
+    question_id = written_list[[i]]$value$id,
+    asking_member_id = written_list[[i]]$value$askingMember$id,  
+    asking_member_name = written_list[[i]]$value$askingMember$name,
+    asking_member_party = written_list[[i]]$value$askingMember$party,
+    asking_member_from = written_list[[i]]$value$askingMember$memberFrom,
+    answering_body_name = written_list[[i]]$value$answeringBodyName
   )
   
   # Append the new row to the dataframe
   written_df <- rbind(written_df, new_row)
 
 }
+```
 
+```{r}
+base_url <- 'https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2022-01-01&parameters.answeringDateEnd=2022-01-31&parameters.answeringBodyIds=17&parameters.answeringBodyIds=14&parameters.answeringBodyIds=214&parameters.answeringBodyIds=202&parameters.answeringBodyIds=29&parameters.skip='
+
+skip_records <- 0
+
+take_records <- '&parameters.take=100'
+
+oral_data <- get_data(base_url,
+                      skip_records,
+                      take_records)
+
+#create a new list
+oral_list <- list()
+
+oral_list <- append(results_list, oral_data$results)
+
+#calculate the number of times we are going to need to make the request by using totalResults
+#set this number as num_requests
+num_requests <- ceiling(oral_data$PagingInfo$GlobalTotal / 100)
+
+for (i in 1:num_requests){
+  
+  #update user
+  cat("Getting request ", i, " out of ", num_requests)
+  
+  #update the skip number
+  skip_records <- skip_records + 100
+  
+  #update the url
+  oral_data <- get_data(base_url,
+                        skip_records,
+                        take_records)
+  
+  oral_list <- append(oral_list, oral_data$Response)
+  #add a pause
+  Sys.sleep(2)
+}
+
+#construct the master df
+
+for (i in seq_along(oral_list)){ 
+  # Create a new row
+  new_row <- tibble(
+    question_id = oral_list[[i]]$value$id,
+    asking_member_id = oral_list[[i]]$value$askingMember$id,  
+    asking_member_name = oral_list[[i]]$value$askingMember$name,
+    asking_member_party = oral_list[[i]]$value$askingMember$party,
+    asking_member_from = oral_list[[i]]$value$askingMember$memberFrom,
+    answering_body_name = oral_list[[i]]$value$answeringBodyName
+  )
+  
+  # Append the new row to the dataframe
+  written_df <- rbind(written_df, new_row)
+
+}
+```
+
+```{r}
 #gender
 #where they are from
 ```
