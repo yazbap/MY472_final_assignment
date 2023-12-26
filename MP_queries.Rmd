@@ -14,126 +14,91 @@ library("RSQLite")
 ```
 
 ```{r}
+get_data <- function(base_url, skip_records, take_records){
+  url <- paste0(base_url, skip_records, take_records)
+  data<- GET(url)
+  
+  data_parsed <- content(data, "parsed")
+  
+  return(data_parsed)
+}
+```
+
+
+```{r}
 #set the base url
+base_url <- 'https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-01-15&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons&skip='
+
 #set the skip_records
+skip_records <- 0
+
 #set_take_records
+take_records <- '&take=100'
 
 #perform the first request
+written_data <- get_data(base_url, 
+                         skip_records, 
+                         take_records)
 
-#parse the data
+#create a new list
+results_list <- list()
+
+results_list <- append(results_list, written_data$results)
 
 #calculate the number of times we are going to need to make the request by using totalResults
 #set this number as num_requests
-
-#create a new list (new_list <- list())
-
-#append the results to the new list ( new_list <- append(new_list, written_questions_parsed$results)) )
+num_requests <- ceiling(written_data$totalResults / 100)
 
 #for each request in num_requests
-  #construct the request making sure to update the skip number
-  #parse the data (written_questions_parsed <- content(written_questions_get, "parsed") #httr)
-
-  #add it to the master list
-
-  #print progress
-
+for (i in 1:num_requests){
+  
+  #update user
+  cat("Getting request ", i, " out of ", num_requests)
+  
+  #update the skip number
+  skip_records <- skip_records + 100
+  
+  #update the url
+  written_data <- get_data(base_url, 
+                                     skip_records, 
+                                     take_records,
+                                     written_questions_list)
+  
+  results_list <- append(results_list, written_data$results)
   #add a pause
+  Sys.sleep(2)
+}
+
+print(results_list)
 
 #construct the master df
 
-#set question id
-#set asking member id
-#set asking member name (written_questions_parsed$results[[i]]$value$askingMember$name)
-#set asking member party (written_questions_parsed$results[[i]]$value$askingMember$party)
-#set asking member from (written_questions_parsed$results[[i]]$value$askingMember$memberFrom)
-#set member has interest
-#answeringBodyName
+written_df <- tibble(question_id = as.character(), 
+                     asking_member_id = as.integer(),
+                     asking_member_name = as.character(),
+                     asking_member_party = as.character(),
+                     asking_member_from = as.character(),
+                     member_has_interest = as.character(),
+                     answering_body_name = as.character())
 
+for (i in seq_along(results_list)){ 
+  # Create a new row
+  new_row <- tibble(
+    question_id = results_list[[i]]$value$id,
+    asking_member_id = results_list[[i]]$value$askingMember$id,  
+    asking_member_name = results_list[[i]]$value$askingMember$name,
+    asking_member_party = results_list[[i]]$value$askingMember$party,
+    asking_member_from = results_list[[i]]$value$askingMember$memberFrom,
+    answering_body_name = results_list[[i]]$value$answeringBodyName
+  )
+  
+  # Append the new row to the dataframe
+  written_df <- rbind(written_df, new_row)
 
-# for (i in seq_along(written_questions_parsed$results)){ print(written_questions_parsed$results[[i]]$value$askingMember$name)}
-
-#store the data in a db
+}
 
 #gender
 #where they are from
-```
-
-
-```{r}
-get_qs <- function(endpoint_url, n_skip = 0) {
-  url <- paste0(
-    endpoint_url,
-    "?parameters.skip=",
-    n_skip,
-    "&parameters.take=100")
-
-  response <-
-    GET(url) |>
-    content("parsed")
-
-  return(response)
-}
-
-pull_all_written_qs <- function(endpoint_url){
-
-  # Calculate how many questions are in the end point
-  n_resp <- GET(endpoint_url) |>
-    content("parsed")
-  n <- n_resp$totalResults
-
-
-  # Questions can be pulled in batches of 100,
-  # calculate how many time we will have to pull
-  n_loops <- ceiling(n / 100)
-
-  print(paste0("Written Qs started at ", Sys.time()))
-
-  for (i in 1:n_loops) {
-
-    n_skip <- (i - 1) * 100 # Skip however many 100s the loop has run
-
-    if (i == 1) { # On first iteration, make new list
-
-      response <- get_qs(endpoint_url, n_skip)
-      response <- response$results
-
-    } else { # On all other iterations, append to existing list
-
-      response_new <- get_qs(endpoint_url, n_skip)
-      response_new <- response_new$results
-      response <- c(response, response_new) # Merge responses
-
-    }
-
-    print(paste0(i, " of ", n_loops, " done.")) # Print progress message
-    Sys.sleep(1) # Sleep to avoid hammering the API 
-
-  }
-
-  print(paste0("Written Qs done at ", Sys.time()))
-  return(response)
-}
-
-written_questions <- pull_all_written_qs(
-  "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-01-10&answered=Any&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons")
-
-for (i in seq_along(written_questions)){
-  print(written_questions[[i]]$value$askingMemberId)
-}
-
-written_questions[[i]]$value$askingMember
-
-summary(written_questions[[6]]$value)
-```
-
-```{r}
-written_questions_get <- GET('https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-01-02&answered=Any&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons')
-
-written_questions_parsed <- content(written_questions_get, "parsed") #httr
-
-for (i in seq_along(written_questions_parsed$results)){
-  print(written_questions_parsed$results[[i]]$value$askingMember$name)
-}
 ```
 
 
