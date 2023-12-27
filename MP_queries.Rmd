@@ -25,9 +25,10 @@ get_data <- function(url){
 create_written_df_row <- function(element){
   new_row <- tibble(
     question_id = element$value$id,
-    asking_member_id = element$value$askingMember$id,  
+    asking_member_id = element$value$askingMemberId,  
     asking_member_name = element$value$askingMember$name,
-    asking_member_party = element$AskingMember$Party,
+    asking_member_party = element$value$askingMember$party,
+    asking_member_from = element$value$askingMember$memberFrom,
     answering_body_name = element$value$answeringBodyName
   )
   return(new_row)
@@ -39,6 +40,7 @@ create_oral_df_row <- function(element){
     asking_member_id = element$AskingMemberId,  
     asking_member_name = element$AskingMember$Name,
     asking_member_party = element$AskingMember$Party,
+    asking_member_from = element$AskingMember$Constituency,
     answering_body_name = element$AnsweringBody
   )
   return(new_row)
@@ -112,7 +114,7 @@ get_oral_data <- function(base_url, skip_records, take_records){
 
 ```{r}
 #set the base url
-base_url <- 'https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-01-15&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons&skip='
+base_url <- 'https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-01-10&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons&skip='
 
 #set the skip_records
 skip_records <- 0
@@ -132,9 +134,48 @@ oral_df <- get_oral_data(base_url,skip_records,take_records)
 
 all_qs <- rbind(written_df, oral_df)
 
+all_qs_grouped <- all_qs %>%
+  group_by(asking_member_id) %>%
+  summarise(
+    health_welfare_count = sum(answering_body_name %in% c("Department of Health and Social Care", "Department for Work and Pensions")),
+    economic_count = sum(!answering_body_name %in% c("Department of Health and Social Care", "Department for Work and Pensions")),
+    majority_health_welfare = ifelse(health_welfare_count > economic_count, TRUE,FALSE),
+    majority_economic = ifelse(health_welfare_count < economic_count, TRUE,FALSE),
+    no_majority = ifelse(health_welfare_count == economic_count, TRUE,FALSE)
+  )
+
+all_qs_processed <- left_join(all_qs_grouped, all_qs %>%
+                       distinct(asking_member_id, .keep_all = TRUE), 
+                       by = "asking_member_id") %>%
+  select(c(asking_member_name, 
+           asking_member_party, 
+           asking_member_from, 
+           majority_health_welfare, 
+           majority_economic, 
+           no_majority))
+
 ```
 
 ```{r}
+
+datasets <- GET("http://www.nomisweb.co.uk/api/v01/dataset/def.sdmx.json?search=name-TS037*")
+
+dataset_parsed<- content(datasets, "parsed")
+
+for (i in seq_along(dataset_parsed$structure$keyfamilies$keyfamily)){
+  print(dataset_parsed$structure$keyfamilies$keyfamily[[i]]$annotations$annotation[[11]]$annotationtext)
+}
+
+# get list options
+health_options <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1/geography.def.sdmx.json?")
+
+options_parsed <- content(health_options, "parsed")
+
+#get actual data
+general_health <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json?geography=641731929&measures=20301&c2021_health_6=5")
+
+health_parsed <- content(general_health, "parsed")
+
 #gender
 #where they are from
 ```
