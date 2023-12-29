@@ -10,6 +10,9 @@ library("httr")
 library("tidyverse")
 library("DBI")
 library("RSQLite")
+library("RSelenium")
+library("xml2")
+library("rvest")
 ```
 
 ```{r}
@@ -106,12 +109,172 @@ get_oral_data <- function(base_url, skip_records, take_records){
   
   return(results)
 }
+
+process_questions <- function(df){
+  # Group the combined data by asking_member_id 
+  df_grouped <- df %>%
+    group_by(asking_member_id) %>%
+  
+    # Summarize the data: calculate counts and majority-related columns
+    summarise(
+      health_welfare_count = sum(answering_body_name %in% c("Department of Health and Social Care", 
+                                                            "Department for Work and Pensions")),
+      
+      economic_count = sum(!answering_body_name %in% c("Department of Health and Social Care", 
+                                                       "Department for Work and Pensions")),
+      
+      health_welfare_proportion = round(health_welfare_count/ (health_welfare_count + 
+                                                                 economic_count), 
+                                        2),
+      
+      economic_proportion = 1- health_welfare_proportion)
+
+  # Left join the grouped data with additional information from the original df
+  df_processed <- left_join(df_grouped, df %>%
+                                         
+                         # Keep only distinct records based on asking_member_id
+                         distinct(asking_member_id, .keep_all = TRUE), 
+                         
+                         by = "asking_member_id") %>%
+    
+    # Select specific columns for the final processed dataframe
+    select(c(asking_member_name, 
+             asking_member_party, 
+             asking_member_from, 
+             health_welfare_proportion, 
+             economic_proportion))
+  
+  return (df_processed)
+}
+
+generate_static_selectors <- function(element_types, element_path){
+  lst <- list() # Create list
+  
+  lst <- append(lst, element_path) # Add element path to the list
+  
+  names(lst) <-element_types # Name the element
+  
+  return (lst)
+}
+
+clean_geo_id <- function(input_string) {
+  # Extract text within parentheses
+  geo_id_processed <- regmatches(input_string,
+                                 regexpr("\\(([^)]+)\\)",
+                                         input_string))
+  
+  # Remove parentheses
+  geo_clean <- gsub("[()]", "", geo_id_processed)
+  
+  # Return the cleaned result
+  return(geo_clean)
+}
+
+get_geo_ids <- function(url, selector_list){
+  # Create driver
+  rD <- rsDriver(browser=c("firefox"), verbose = F, 
+                   port = netstat::free_port(random = TRUE), 
+                   chromever = NULL) 
+  
+  driver <- rD$client
+  
+  #Create list to store geo data
+  geography_ids <- list()
+  
+  # Loop through constituencies
+  for (constituency in member_constituencies$asking_member_from){
+    cat("Getting data for ", constituency, "\n")
+    
+    #navigate to homepage
+    driver$navigate(url)
+    
+    #wait for page to load
+    Sys.sleep(2)
+    
+    tryCatch(
+          {
+            #try to find the search bar
+            search_box <- driver$findElement(using = "xpath",
+                                             value = selector_list$search_box)
+          },
+          error = function(e){ #if the search bar isn't found
+            cat("Trying ", constituency, " again\n")
+            
+            # Add a pause
+            Sys.sleep(2)
+            
+            # Try to find the search bar again
+            search_box <- driver$findElement(using = "xpath",
+                                             value = selector_list$search_box)
+            
+          }
+        )
+    
+    # Send the constituency name into the search bar
+    search_box$sendKeysToElement(list(constituency))
+    
+    # Wait for options to pop up
+    Sys.sleep(2)
+    
+    # Set flag to indicate whether the appropriate option was found
+    element_found <- FALSE
+  
+    while (!element_found) { #while the element has not been found
+      
+      tryCatch(
+        {
+          # Search for parliamentary constituency we are collecting data for
+          option <- driver$findElement("xpath", 
+                                       paste0("//div[contains(@class, 'listItem')",
+                                       " and contains(., 'Parliamentary constituency')]"))
+          
+          # If the element is found, set the flag to exit the loop
+          element_found <- TRUE
+        },
+        error = function(e) { # If the element is not found
+          cat("Trying ", constituency, " again\n")
+          
+          # Add a pause
+          Sys.sleep(2)
+          
+          # Try to find the option again
+          option <- driver$findElement("xpath", 
+                                       paste0("//div[contains(@class, 'listItem')",
+                                       " and contains(., 'Parliamentary constituency')]"))
+        }
+      )
+    }
+    
+    # Click that parliamentary constituency
+    option$clickElement()
+    
+    # Wait for the page to load
+    Sys.sleep(2)
+    
+    #Get the string that has the geographic ID in it
+    geo_id <- driver$findElement("xpath", 
+                                 '//*[@id="main"]/div[2]/div/p')$getElementText()
+    
+    # Add the string to the list
+    geography_ids <- c(geography_ids, geo_id)
+  }
+  
+  driver$close()
+  
+  return(geography_ids)
+}
 ```
 
 
 ```{r eval=FALSE}
 # Set the base URL for the written questions API with specific parameters
-written_base_url <- 'https://questions-statements-api.parliament.uk/api/writtenquestions/questions?tabledWhenFrom=2022-01-01&tabledWhenTo=2022-12-31&includeWithdrawn=true&expandMember=true&answeringBodies=17&answeringBodies=14&answeringBodies=214&answeringBodies=202&answeringBodies=29&house=Commons&skip='
+written_base_url <- paste0('https://questions-statements-api.parliament.uk/',
+                           'api/writtenquestions/questions?', 
+                           'tabledWhenFrom=2022-01-01&tabledWhenTo=2022-12-31',
+                           '&includeWithdrawn=true&expandMember=true',
+                           '&answeringBodies=17&answeringBodies=14&answeringBodies=214',
+                           '&answeringBodies=202&answeringBodies=29',
+                           '&house=Commons&skip=')
 
 # Set the number of records to skip for pagination
 written_skip_records <- 0
@@ -125,7 +288,13 @@ written_df <- get_written_data(written_base_url,
                                written_take_records)
 
 # Set the base URL for the oral questions API with specific parameters
-oral_base_url <- 'https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2022-01-01&parameters.answeringDateEnd=2022-12-31&parameters.answeringBodyIds=17&parameters.answeringBodyIds=14&parameters.answeringBodyIds=214&parameters.answeringBodyIds=202&parameters.answeringBodyIds=29&parameters.skip='
+oral_base_url <- paste0('https://oralquestionsandmotions-api.parliament.uk',
+                        '/oralquestions/list?',
+                        'parameters.answeringDateStart=2022-01-01',
+                        '&parameters.answeringDateEnd=2022-12-31',
+                        '&parameters.answeringBodyIds=17&parameters.answeringBodyIds=14',
+                        '&parameters.answeringBodyIds=214&parameters.answeringBodyIds=202',
+                        '&parameters.answeringBodyIds=29&parameters.skip=')
 
 # Set the number of records to skip for pagination
 oral_skip_records <- 0
@@ -141,40 +310,7 @@ oral_df <- get_oral_data(oral_base_url,
 # Combine written and oral question data 
 all_questions_df <- rbind(written_df, oral_df)
 
-# Group the combined data by asking_member_id 
-all_questions_grouped <- all_questions_df %>%
-  group_by(asking_member_id) %>%
-  
-  # Summarize the data: calculate counts and majority-related columns
-  summarise(
-    health_welfare_count = sum(answering_body_name %in% c("Department of Health and Social Care", 
-                                                          "Department for Work and Pensions")),
-    
-    economic_count = sum(!answering_body_name %in% c("Department of Health and Social Care", 
-                                                     "Department for Work and Pensions")),
-    
-    majority_health_welfare = ifelse(health_welfare_count > economic_count, TRUE, FALSE),
-    
-    majority_economic = ifelse(health_welfare_count < economic_count, TRUE, FALSE),
-    
-    no_majority = ifelse(health_welfare_count == economic_count, TRUE, FALSE)
-  )
-
-# Left join the grouped data with additional information from the original df
-all_questions_processed <- left_join(all_questions_grouped, all_questions_df %>%
-                                       
-                       # Keep only distinct records based on asking_member_id
-                       distinct(asking_member_id, .keep_all = TRUE), 
-                       
-                       by = "asking_member_id") %>%
-  
-  # Select specific columns for the final processed dataframe
-  select(c(asking_member_name, 
-           asking_member_party, 
-           asking_member_from, 
-           majority_health_welfare, 
-           majority_economic, 
-           no_majority))
+all_questions_processed <- process_questions(all_questions_df)
 
 # Set the path to the SQLite database
 database = 'database/parliament_data.db'
@@ -193,11 +329,159 @@ dbDisconnect(db)
 ```{r}
 db <- dbConnect(RSQLite::SQLite(), database)
 
+member_constituencies <- dbGetQuery(db,
+           "SELECT asking_member_name, asking_member_from, asking_member_party, health_welfare_proportion, economic_proportion 
+           FROM member_details")
 
+# Define selector type
+types <- c("search_box")
+
+# Define xpath for selector
+paths <- c('//*[@id="search"]')
+
+# Create list with the selector
+selector_list <- generate_static_selectors(types, paths)
+
+url <- "https://www.ons.gov.uk/visualisations/areas/"
+
+geography_ids <- get_geo_ids(url, selector_list)
+
+# Apply the function to each element in the list
+cleaned_geo_ids <- lapply(geography_ids, clean_geo_id)
+
+member_constituencies$geo_ids <- unlist(cleaned_geo_ids)
+
+
+general_health <- read_csv('database/RM044-2021-2-filtered-2023-12-29T15_14_29Z.csv')
+
+general_health_processed <- general_health %>%
+  group_by(`Westminster Parliamentary constituencies`) %>%
+  summarise(
+    proportion = sum(Observation[`General health (6 categories)` %in% c("Very good health", "Good health")]) /
+                 sum(Observation)
+  ) %>%
+  ungroup()
+
+merged_data <- left_join(member_constituencies,
+                         general_health_processed,
+                         by = c("asking_member_from" = "Westminster Parliamentary constituencies"))
+
+merged_data_parties <- merged_data %>%
+  mutate(asking_member_party = ifelse(asking_member_party %in% c("Conservative", 
+                                                                 "Labour",
+                                                                 "Scottish National Party"),
+                                       asking_member_party,
+                                       "Other"))
+
+boxplot(health_welfare_proportion ~ asking_member_party, 
+        data = merged_data_parties,
+        main="Boxplot of Health Welfare Proportion by Party",
+        xlab="Asking Member Party", ylab="Health Welfare Proportion")  
+
+boxplot(economic_proportion ~ asking_member_party, 
+        data = merged_data_parties,
+        main="Boxplot of Economic Proportion by Party",
+        xlab="Asking Member Party", ylab="Economic Proportion")  
+```
+
+
+
+```{r}
+code_mapping
+
+library("nomisr")
+
+test <- nomis_get_data(
+  id = "NM_2055_1",
+  measures = 20301,
+  time = "2022",
+  geography = "E00083860"
+)
+
+geography_nomis <- nomis_codelist("NM_2055_1", "geography")
+
+geography_nomis_w_type <- nomis_get_metadata(id= "NM_2055_1", concept = "geography", type = "TYPE460")
+
+metadata <- nomis_get_metadata("NM_2055_1")
+
+View(geography_nomis)
+
+data_info_w_type <- nomis_data_info("NM_2055_1")
+
+View(member_constituencies)
+
+
+
+
+
+
+
+
+
+# Nomis API endpoint
+url <- "http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json"
+
+# Example geography code for a Westminster Parliamentary constituency (replace with the actual code)
+constituency_code <- "E14001048"
+
+# Example measures code (replace with the actual code)
+measures_code <- "20301"
+
+# Query parameters
+query_params <- list(
+  geography = constituency_code,
+  measures = measures_code
+)
+
+# Make the API request
+response <- GET(url, query = query_params)
+
+# Parse the JSON response
+json_data <- content(response, "parsed")
+
+
+
+
+
+
+
+
+
+#set base url
+base_url <- 'http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json?geography='
+
+# Url suffix very good health
+url_suffix_very_good <- '&measures=20301&c2021_health_6=1'
+  
+# Url suffix good health
+url_suffix_good <- '&measures=20301&c2021_health_6=2'
 
 datasets <- GET("http://www.nomisweb.co.uk/api/v01/dataset/def.sdmx.json?search=name-TS037*")
 
 dataset_parsed<- content(datasets, "parsed")
+
+geographies <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json?")
+
+geographies_parsed <- content(geographies, "parsed")
+
+geographies_df <- tibble(id = as.character(),
+                      name = as.character())
+
+for (i in seq_along(geographies_parsed$dimension$geography$category$label)) {
+  geo_name <- names(geographies_parsed$dimension$geography$category$label)[i]
+  geo_label <- geographies_parsed$dimension$geography$category$label[[i]]
+  
+  new_row <- tibble(id = geo_name, name = geo_label)
+  
+  geographies_df <- bind_rows(geographies_df, new_row)
+  
+}
+
+member_geography_df <- merge(member_constituencies, 
+                             geographies_df, 
+                             by.x = "asking_member_from", 
+                             by.y = "id", 
+                             all.x = TRUE)
 
 # get list options
 health_options <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1/geography.def.sdmx.json?")
@@ -205,16 +489,15 @@ health_options <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1/geogr
 options_parsed <- content(health_options, "parsed")
 
 #get actual data
-general_health <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json?geography=641731929&measures=20301&c2021_health_6=5")
+general_health <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json?geography=2092957703&measures=20301&c2021_health_6=1")
 
 health_parsed <- content(general_health, "parsed")
+
+as.numeric(health_parsed$value[[1]])
 
 #gender
 #where they are from
 ```
-
-
-
 
 
 This document contains the necessary commands and layout to meet the formatting requirements for MY472. You should use the template.Rmd file as the basis for your own answers to the assigned exercises.
