@@ -13,6 +13,9 @@ library("RSQLite")
 library("RSelenium")
 library("xml2")
 library("rvest")
+library("sf")
+library("rnaturalearth")
+library("tmap")
 ```
 
 ```{r}
@@ -263,8 +266,67 @@ get_geo_ids <- function(url, selector_list){
   
   return(geography_ids)
 }
+
+get_region <- function(link_texts) {
+  for (link_text in link_texts) {
+    if ("England" %in% link_text) {
+      return("England")
+    } else if ("Scotland" %in% link_text) {
+      return("Scotland")
+    } else if ("Northern Ireland" %in% link_text) {
+      return("Northern Ireland")
+    } else if ("Wales" %in% link_text) {
+      return("Wales")
+    }
+  }
+  return(NA)  # If none of the regions are found
+}
+
+get_regions <- function(df){
+  base_url <- 'https://www.ons.gov.uk/visualisations/areas/'
+
+  regions <- c()
+  
+  for (constituency_id in df$geo_ids){
+    cat("Getting data for ", constituency_id, "\n")
+    
+    url <- paste0(base_url, constituency_id, "/")
+    
+    html_content <- read_html(url)
+    
+    link_data <- get_all_links(html_content)
+  
+    link_data$link_texts
+    
+    region <- get_region(link_data)
+    
+    regions <- c(regions, region)
+  }
+  return(regions)
+}
+
+get_all_links <- function(html){ # Gets all links from the input HTML
+  
+  # Extract all hyperlink elements from the provided HTML
+  link_elements <- html %>% 
+    html_elements(css = "a")
+  
+  # Extract the text content from the extracted urls.
+  link_texts <- link_elements %>% html_text()
+  
+  # Create a list containing the elements and their corresponding texts
+  link_data <- list("link_elements" = link_elements, 
+                    "link_texts" = link_texts)
+  
+  # Return the created list containing link_elements and link_texts.
+  return(link_data)
+}
 ```
 
+```{r}
+# Set the path to the SQLite database
+database = 'database/parliament_data.db'
+```
 
 ```{r eval=FALSE}
 # Set the base URL for the written questions API with specific parameters
@@ -312,9 +374,6 @@ all_questions_df <- rbind(written_df, oral_df)
 
 all_questions_processed <- process_questions(all_questions_df)
 
-# Set the path to the SQLite database
-database = 'database/parliament_data.db'
-
 # Connect to the SQLite database
 db <- dbConnect(RSQLite::SQLite(), database)
 
@@ -326,69 +385,193 @@ dbDisconnect(db)
 
 ```
 
+Oral and written questions enable Members of Parliament (MPs) in the House of Commons to scrutinize the government's actions and policies. In this investigation, I aim to answer the following questions:
+
+- Does party affiliation influence the focus of MPs' questions in the House of Commons? Specifically, are MPs from the Labour Party more inclined to pose questions about health and welfare issues, while Conservative MPs tend to emphasize economic matters?
+
+- How do regional variations within party affiliations impact MPs' questioning behavior? Are there specific regions where MPs, irrespective of party, converge on certain issues, possibly influenced by local demographics, economic conditions, or health disparities?
+
+- As an additional exploration, is there a correlation between the general health status of a region and the intensity of questions posed by MPs on health issues? Are MPs more likely to address health concerns when representing constituencies with distinct health profiles, and does this correlation persist across different political affiliations and regions?
+
+By addressing these questions, this report seeks to unveil the intricate interplay between party dynamics, regional influences, and the overarching health context in shaping the discourse within the House of Commons.
+
 ```{r}
 db <- dbConnect(RSQLite::SQLite(), database)
 
 member_constituencies <- dbGetQuery(db,
-           "SELECT asking_member_name, asking_member_from, asking_member_party, health_welfare_proportion, economic_proportion 
+           "SELECT asking_member_name, 
+           asking_member_from, 
+           asking_member_party, 
+           health_welfare_proportion, 
+           economic_proportion 
            FROM member_details")
 
-# Define selector type
-types <- c("search_box")
-
-# Define xpath for selector
-paths <- c('//*[@id="search"]')
-
-# Create list with the selector
-selector_list <- generate_static_selectors(types, paths)
-
-url <- "https://www.ons.gov.uk/visualisations/areas/"
-
-geography_ids <- get_geo_ids(url, selector_list)
-
-# Apply the function to each element in the list
-cleaned_geo_ids <- lapply(geography_ids, clean_geo_id)
-
-member_constituencies$geo_ids <- unlist(cleaned_geo_ids)
-
-
-general_health <- read_csv('database/RM044-2021-2-filtered-2023-12-29T15_14_29Z.csv')
-
-general_health_processed <- general_health %>%
-  group_by(`Westminster Parliamentary constituencies`) %>%
-  summarise(
-    proportion = sum(Observation[`General health (6 categories)` %in% c("Very good health", "Good health")]) /
-                 sum(Observation)
-  ) %>%
-  ungroup()
-
-merged_data <- left_join(member_constituencies,
-                         general_health_processed,
-                         by = c("asking_member_from" = "Westminster Parliamentary constituencies"))
-
-merged_data_parties <- merged_data %>%
-  mutate(asking_member_party = ifelse(asking_member_party %in% c("Conservative", 
-                                                                 "Labour",
-                                                                 "Scottish National Party"),
-                                       asking_member_party,
-                                       "Other"))
+member_constituencies <- member_constituencies %>%
+  mutate(asking_member_party = ifelse(
+    asking_member_party %in% c("Conservative", 
+                               "Labour",
+                               "Scottish National Party"),
+    asking_member_party,
+    "Other")) 
 
 boxplot(health_welfare_proportion ~ asking_member_party, 
-        data = merged_data_parties,
+        data = member_constituencies,
         main="Boxplot of Health Welfare Proportion by Party",
         xlab="Asking Member Party", ylab="Health Welfare Proportion")  
 
 boxplot(economic_proportion ~ asking_member_party, 
-        data = merged_data_parties,
+        data = member_constituencies,
         main="Boxplot of Economic Proportion by Party",
         xlab="Asking Member Party", ylab="Economic Proportion")  
 ```
 
 
 
-```{r}
-code_mapping
+```{r, eval=FALSE}
+# Remove questions from Members who were removed from office mid-year
+values_to_remove <- c("Neil Parish", "Kate Green")
 
+# Remove values
+member_constituencies <- member_constituencies[
+  !member_constituencies$asking_member_name %in% values_to_remove, ]
+
+search_box_path <- list('//*[@id="search"]')
+names(search_box_path) <- "search_box"
+
+url <- "https://www.ons.gov.uk/visualisations/areas/"
+
+geography_ids <- get_geo_ids(url, search_box_path)
+
+# Apply the function to each element in the list
+cleaned_geo_ids <- lapply(geography_ids, clean_geo_id)
+
+member_constituencies$geo_ids <- unlist(cleaned_geo_ids)
+
+member_constituencies$region <- get_regions(member_constituencies)
+
+member_constituencies_filtered <- member_constituencies %>%
+  subset(region %in% c("England", "Wales"))
+  
+# Connect to the SQLite database
+db <- dbConnect(RSQLite::SQLite(), database)
+
+# Write the processed data into the database
+dbWriteTable(db, "member_details", 
+             member_constituencies_filtered, 
+             overwrite = TRUE)
+
+# Disconnect from the database
+dbDisconnect(db)
+
+```
+
+```{r}
+# Connect to the SQLite database
+db <- dbConnect(RSQLite::SQLite(), database)
+
+member_constituencies <- dbGetQuery(db,
+           "SELECT asking_member_name, 
+           asking_member_from, 
+           asking_member_party, 
+           health_welfare_proportion, 
+           economic_proportion,
+           region
+           FROM member_details")
+
+member_constituencies <- member_constituencies %>%
+  mutate(asking_member_from = ifelse(asking_member_from == "Weston-super-Mare",
+                                     "Weston-Super-Mare",
+                                     asking_member_from))
+
+# Disconnect from the database
+dbDisconnect(db)
+
+disability_hh <- read_csv("data/TS040-2021-3-filtered-2023-12-31T17_15_12Z.csv")
+
+disability_hh_processed <- disability_hh %>%
+  group_by(`Westminster Parliamentary constituencies`) %>%
+  summarise(
+    disabled_proportion = sum(Observation[
+      `Number of disabled people in household (4 categories)` %in% 
+        c("1 person disabled under the Equality Act in household", 
+          "2 or more people disabled under the Equality Act in household")]) /
+      sum(Observation)
+  ) %>%
+  ungroup()
+
+disability_data <- left_join(member_constituencies,
+                         disability_hh_processed,
+                         by = c("asking_member_from" = "Westminster Parliamentary constituencies"))
+
+disability_data_filtered <- disability_data %>%
+  subset(disabled_proportion <= .3)
+
+
+#MAY NEED TO DELETE
+ggplot(disability_data, aes(x = disabled_proportion, 
+                        y = health_welfare_proportion, 
+                        color = asking_member_party)) +
+  geom_point() +
+  facet_wrap(~ region) +
+  ggtitle("Scatter Plots for Each Category") +
+  theme_minimal()
+```
+
+```{r fig.width = 13, fig.height = 13}
+england_wales <- st_as_sf(ne_countries(geounit = c("England", 
+                                        "Wales"),
+                            type = "map_units"))
+
+constituencies_shp <- read_sf(paste0("data/",
+                              "Westminster_Parliamentary_Constituencies_",
+                              "Dec_2021_UK_BFE_2022_-7013535748659767197/",
+                              "PCON_DEC_2021_UK_BFE.shp"))
+
+constituencies_shp_merged <- constituencies_shp %>%
+  left_join(disability_data, 
+            by = join_by(PCON21NM == asking_member_from)) %>%
+  
+  #remove rows that are not a aprt of our analysis
+  filter(!is.na(region))
+
+parties <- tm_shape(constituencies_shp_merged) +
+  tm_borders(lwd=0.3) +
+  tm_fill(col = "health_welfare_proportion", palette = "Blues") +
+  tm_layout(title = "Constituency Map") +
+  # Highlight Wales with a thicker border
+  tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
+  tm_borders(lwd=1)
+
+disability_map <- tm_shape(constituencies_shp_merged) +
+  tm_borders() +
+  tm_fill(
+    col = "proportion_good",
+    palette = "Blues",  # Choose a color palette
+    style = "cont",
+    alpha = 1
+  ) +
+  tm_layout(title = "Constituency Map") +
+  tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
+  tm_borders(lwd=1)
+
+tmap_arrange(parties, disability_map, ncol = 2)
+```
+
+```{r}
+avg_intensity <- aggregate(health_welfare_proportion ~ asking_member_party + region, data = disability_data_filtered, FUN = mean)
+
+# Create a bar chart using ggplot2
+ggplot(avg_intensity, aes(x = region, y = health_welfare_proportion, fill = asking_member_party)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Average Intensity of Questions by Political Affiliation and Region",
+       x = "Region",
+       y = "Average Intensity of Questions") +
+  theme_minimal()
+```
+
+
+
+```{r, eval=FALSE}
 library("nomisr")
 
 test <- nomis_get_data(
@@ -397,6 +580,8 @@ test <- nomis_get_data(
   time = "2022",
   geography = "E00083860"
 )
+
+View(geography_nomis)
 
 geography_nomis <- nomis_codelist("NM_2055_1", "geography")
 
@@ -408,7 +593,7 @@ View(geography_nomis)
 
 data_info_w_type <- nomis_data_info("NM_2055_1")
 
-View(member_constituencies)
+View(merged_data_parties)
 
 
 
