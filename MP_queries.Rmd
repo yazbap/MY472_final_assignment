@@ -19,34 +19,15 @@ library("tmap")
 ```
 
 ```{r}
+#=========================================================
+# Get Functions
+#=========================================================
 get_data <- function(url){
   data<- GET(url)
   
   data_parsed <- content(data, "parsed")
   
   return(data_parsed)
-}
-
-create_written_df_row <- function(element){
-  new_row <- tibble(
-    asking_member_id = element$value$askingMemberId,  
-    asking_member_name = element$value$askingMember$name,
-    asking_member_party = element$value$askingMember$party,
-    asking_member_from = element$value$askingMember$memberFrom,
-    answering_body_name = element$value$answeringBodyName
-  )
-  return(new_row)
-}
-
-create_oral_df_row <- function(element){
-  new_row <- tibble(
-    asking_member_id = element$AskingMemberId,  
-    asking_member_name = element$AskingMember$Name,
-    asking_member_party = element$AskingMember$Party,
-    asking_member_from = element$AskingMember$Constituency,
-    answering_body_name = element$AnsweringBody
-  )
-  return(new_row)
 }
 
 get_written_data <- function(base_url, skip_records, take_records){
@@ -111,66 +92,6 @@ get_oral_data <- function(base_url, skip_records, take_records){
   results <- map_df(oral_list, create_oral_df_row) #construct df with needed data
   
   return(results)
-}
-
-process_questions <- function(df){
-  # Group the combined data by asking_member_id 
-  df_grouped <- df %>%
-    group_by(asking_member_id) %>%
-  
-    # Summarize the data: calculate counts and majority-related columns
-    summarise(
-      health_welfare_count = sum(answering_body_name %in% c("Department of Health and Social Care", 
-                                                            "Department for Work and Pensions")),
-      
-      economic_count = sum(!answering_body_name %in% c("Department of Health and Social Care", 
-                                                       "Department for Work and Pensions")),
-      
-      health_welfare_proportion = round(health_welfare_count/ (health_welfare_count + 
-                                                                 economic_count), 
-                                        2),
-      
-      economic_proportion = 1- health_welfare_proportion)
-
-  # Left join the grouped data with additional information from the original df
-  df_processed <- left_join(df_grouped, df %>%
-                                         
-                         # Keep only distinct records based on asking_member_id
-                         distinct(asking_member_id, .keep_all = TRUE), 
-                         
-                         by = "asking_member_id") %>%
-    
-    # Select specific columns for the final processed dataframe
-    select(c(asking_member_name, 
-             asking_member_party, 
-             asking_member_from, 
-             health_welfare_proportion, 
-             economic_proportion))
-  
-  return (df_processed)
-}
-
-generate_static_selectors <- function(element_types, element_path){
-  lst <- list() # Create list
-  
-  lst <- append(lst, element_path) # Add element path to the list
-  
-  names(lst) <-element_types # Name the element
-  
-  return (lst)
-}
-
-clean_geo_id <- function(input_string) {
-  # Extract text within parentheses
-  geo_id_processed <- regmatches(input_string,
-                                 regexpr("\\(([^)]+)\\)",
-                                         input_string))
-  
-  # Remove parentheses
-  geo_clean <- gsub("[()]", "", geo_id_processed)
-  
-  # Return the cleaned result
-  return(geo_clean)
 }
 
 get_geo_ids <- function(url, selector_list){
@@ -321,6 +242,87 @@ get_all_links <- function(html){ # Gets all links from the input HTML
   # Return the created list containing link_elements and link_texts.
   return(link_data)
 }
+
+#=========================================================
+# Create Functions
+#=========================================================
+create_written_df_row <- function(element){
+  new_row <- tibble(
+    asking_member_id = element$value$askingMemberId,  
+    asking_member_name = element$value$askingMember$name,
+    asking_member_party = element$value$askingMember$party,
+    asking_member_from = element$value$askingMember$memberFrom,
+    answering_body_name = element$value$answeringBodyName
+  )
+  return(new_row)
+}
+
+create_oral_df_row <- function(element){
+  new_row <- tibble(
+    asking_member_id = element$AskingMemberId,  
+    asking_member_name = element$AskingMember$Name,
+    asking_member_party = element$AskingMember$Party,
+    asking_member_from = element$AskingMember$Constituency,
+    answering_body_name = element$AnsweringBody
+  )
+  return(new_row)
+}
+
+#=========================================================
+# Processing Functions
+#=========================================================
+process_questions <- function(df){
+  # Group the combined data by asking_member_id 
+  df_grouped <- df %>%
+    group_by(asking_member_id) %>%
+  
+    # Summarize the data: calculate counts and majority-related columns
+    summarise(
+      health_welfare_count = sum(answering_body_name %in% c("Department of Health and Social Care", 
+                                                            "Department for Work and Pensions")),
+      
+      economic_count = sum(!answering_body_name %in% c("Department of Health and Social Care", 
+                                                       "Department for Work and Pensions")),
+      
+      health_welfare_proportion = round(health_welfare_count/ (health_welfare_count + 
+                                                                 economic_count), 
+                                        2),
+      
+      economic_proportion = 1- health_welfare_proportion)
+
+  # Left join the grouped data with additional information from the original df
+  df_processed <- left_join(df_grouped, df %>%
+                                         
+                         # Keep only distinct records based on asking_member_id
+                         distinct(asking_member_id, .keep_all = TRUE), 
+                         
+                         by = "asking_member_id") %>%
+    
+    # Select specific columns for the final processed dataframe
+    select(c(asking_member_name, 
+             asking_member_party, 
+             asking_member_from, 
+             health_welfare_proportion, 
+             economic_proportion))
+  
+  return (df_processed)
+}
+
+#=========================================================
+# Cleaning Functions
+#=========================================================
+clean_geo_id <- function(input_string) {
+  # Extract text within parentheses
+  geo_id_processed <- regmatches(input_string,
+                                 regexpr("\\(([^)]+)\\)",
+                                         input_string))
+  
+  # Remove parentheses
+  geo_clean <- gsub("[()]", "", geo_id_processed)
+  
+  # Return the cleaned result
+  return(geo_clean)
+}
 ```
 
 ```{r}
@@ -385,15 +387,31 @@ dbDisconnect(db)
 
 ```
 
+### Introduction
+
 Oral and written questions enable Members of Parliament (MPs) in the House of Commons to scrutinize the government's actions and policies. In this investigation, I aim to answer the following questions:
 
-- Does party affiliation influence the focus of MPs' questions in the House of Commons? Specifically, are MPs from the Labour Party more inclined to pose questions about health and welfare issues, while Conservative MPs tend to emphasize economic matters?
+- Does party affiliation influence the focus of MPs' questions in the House of Commons? We will focus specifically on written and oral questions related to health and welfare vs. economic questions tabled and answered in 2022.
 
-- How do regional variations within party affiliations impact MPs' questioning behavior? Are there specific regions where MPs, irrespective of party, converge on certain issues, possibly influenced by local demographics, economic conditions, or health disparities?
+- To what extent do variations in MPs' rates of posing questions about health and welfare versus economic matters reflect regional disparities in their constituencies' overall health and employment statuses? This inquiry aims to investigate whether party affiliation remains the primary determinant of MPs' questioning patterns or if Members of Parliament demonstrate responsiveness to the specific needs of their constituents. In essence, does the questioning behavior align more with party conventions, or does it genuinely mirror the pressing concerns of the communities they represent?
 
-- As an additional exploration, is there a correlation between the general health status of a region and the intensity of questions posed by MPs on health issues? Are MPs more likely to address health concerns when representing constituencies with distinct health profiles, and does this correlation persist across different political affiliations and regions?
+### Data
 
-By addressing these questions, this report seeks to unveil the intricate interplay between party dynamics, regional influences, and the overarching health context in shaping the discourse within the House of Commons.
+I collected data from the [UK Parliament API](https://developer.parliament.uk/) and the (Office for National Statistics)[https://www.ons.gov.uk/] to do this analysis. 
+
+For the UK Parliament API, I collected data on 562 written and oral questions from Members of Parliament. To understand which questions were about health and welfare vs economic, I only included questions that were answered by specific Answering Bodies to classify whether a question was about health,  welfare or economic issues. Questions answered by the Department for Business and Trade, Department for International Trade, and the Treasury  were counted as economic questions while questions answered by the Department for Work and Pensions and the Department of Health and Social Care were classified as health and welfare questions. Each time a question was answered by the answering body, 1 additional question was added to the MP's total count and I found the proportion of economic questions vs health and welfare questions for each MP. 
+
+From the Parliamentary API, each member had data on the parlaimentary constituency they represented. To get the region each constituency was a apart of, I collected data from the Office of National Statistics to better highlight the difference between constituencies in Wales vs. England on the map. I also collected data on the general health of each constituency as well as their economic activity. I would expect constituencies with lower levels of general health to be aligned with the party that is asking more questions about health and welfare. I would also expect constituencies with higher levels of economic activity to be associated with the party that asks more questions about economic issues. 
+
+I excluded questions by members who represented Scottish and Irish constituencies because analysis on the general health and economic activity of these areas were not readily available. Further research could explore these regions to get a more holistic view of this topic in the UK.
+
+## Analysis
+
+As seen in Figure 1. Members apart of the Labour Party asked a higher proportion of questions about health and welfare in 2022. Members of the Labour party whose health and welfare questions were less than 30% of their questions were outliers, while members of the conservative party had a wider range while some members asking no questions about health and welfare in any of their questions while also having a lower average of questions about health and welfare and a wider range between their 25th percentile and 75th percentile.
+
+We can see in Figure 2 that members of the conservative party had a higher proportion of questions about economic issues compared to all other parties.
+
+However, it is interesting to note that all parties have similar levels of asking questions about health, welfare and economic issues with economic issues being asked at much lower percentages compared to health and welfare questions. 
 
 ```{r}
 db <- dbConnect(RSQLite::SQLite(), database)
@@ -414,15 +432,22 @@ member_constituencies <- member_constituencies %>%
     asking_member_party,
     "Other")) 
 
-boxplot(health_welfare_proportion ~ asking_member_party, 
-        data = member_constituencies,
-        main="Boxplot of Health Welfare Proportion by Party",
-        xlab="Asking Member Party", ylab="Health Welfare Proportion")  
+ggplot(member_constituencies, aes(x = asking_member_party, y = health_welfare_proportion)) +
+  geom_boxplot() +
+  labs(title = "Percentage of Questions asked about Health and Welfare",
+       x = "Asking Member Party", y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
+  theme_minimal()
 
-boxplot(economic_proportion ~ asking_member_party, 
-        data = member_constituencies,
-        main="Boxplot of Economic Proportion by Party",
-        xlab="Asking Member Party", ylab="Economic Proportion")  
+ggplot(member_constituencies, aes(x = asking_member_party, y = economic_proportion)) +
+  geom_boxplot() +
+  labs(title = "Percentage of Questions asked about Economic Topics",
+       x = "Asking Member Party", y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
+  theme_minimal()
+  
 ```
 
 
@@ -486,35 +511,23 @@ member_constituencies <- member_constituencies %>%
 # Disconnect from the database
 dbDisconnect(db)
 
-disability_hh <- read_csv("data/TS040-2021-3-filtered-2023-12-31T17_15_12Z.csv")
+general_health <- read_csv("data/RM044-2021-2-filtered-2023-12-29T15_14_29Z.csv")
 
-disability_hh_processed <- disability_hh %>%
+general_health_processed <- general_health %>%
   group_by(`Westminster Parliamentary constituencies`) %>%
   summarise(
-    disabled_proportion = sum(Observation[
-      `Number of disabled people in household (4 categories)` %in% 
-        c("1 person disabled under the Equality Act in household", 
-          "2 or more people disabled under the Equality Act in household")]) /
+    good_health_proportion = sum(Observation[
+      `General health (6 categories)` %in% 
+        c("Very good health", 
+          "Good health")]) /
       sum(Observation)
   ) %>%
   ungroup()
 
-disability_data <- left_join(member_constituencies,
-                         disability_hh_processed,
+health_data <- left_join(member_constituencies,
+                         general_health_processed,
                          by = c("asking_member_from" = "Westminster Parliamentary constituencies"))
 
-disability_data_filtered <- disability_data %>%
-  subset(disabled_proportion <= .3)
-
-
-#MAY NEED TO DELETE
-ggplot(disability_data, aes(x = disabled_proportion, 
-                        y = health_welfare_proportion, 
-                        color = asking_member_party)) +
-  geom_point() +
-  facet_wrap(~ region) +
-  ggtitle("Scatter Plots for Each Category") +
-  theme_minimal()
 ```
 
 ```{r fig.width = 13, fig.height = 13}
@@ -536,16 +549,16 @@ constituencies_shp_merged <- constituencies_shp %>%
 
 parties <- tm_shape(constituencies_shp_merged) +
   tm_borders(lwd=0.3) +
-  tm_fill(col = "health_welfare_proportion", palette = "Blues") +
+  tm_fill(col = "asking_member_party", palette = c("lightblue", "lightcoral", "grey80")) + +
   tm_layout(title = "Constituency Map") +
   # Highlight Wales with a thicker border
   tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
   tm_borders(lwd=1)
 
-disability_map <- tm_shape(constituencies_shp_merged) +
+heallth_map <- tm_shape(constituencies_shp_merged) +
   tm_borders() +
   tm_fill(
-    col = "proportion_good",
+    col = "good_health_proportion",
     palette = "Blues",  # Choose a color palette
     style = "cont",
     alpha = 1
@@ -554,19 +567,7 @@ disability_map <- tm_shape(constituencies_shp_merged) +
   tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
   tm_borders(lwd=1)
 
-tmap_arrange(parties, disability_map, ncol = 2)
-```
-
-```{r}
-avg_intensity <- aggregate(health_welfare_proportion ~ asking_member_party + region, data = disability_data_filtered, FUN = mean)
-
-# Create a bar chart using ggplot2
-ggplot(avg_intensity, aes(x = region, y = health_welfare_proportion, fill = asking_member_party)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  labs(title = "Average Intensity of Questions by Political Affiliation and Region",
-       x = "Region",
-       y = "Average Intensity of Questions") +
-  theme_minimal()
+tmap_arrange(parties, heallth_map, ncol = 2)
 ```
 
 
