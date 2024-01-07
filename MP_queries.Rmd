@@ -5,7 +5,10 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE} 
-knitr::opts_chunk$set(echo = FALSE) # actually set the global chunk options. 
+# Set global chunk options
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE) 
+
+# Add libraries
 library("httr")
 library("tidyverse")
 library("DBI")
@@ -23,10 +26,14 @@ library("tmap")
 # Get Functions
 #=========================================================
 get_data <- function(url){
-  data<- GET(url)
   
+  # Use GET function to retrieve data from the specified URL
+  data <- GET(url)
+  
+  # Parse the retrieved data
   data_parsed <- content(data, "parsed")
   
+  # Return the parsed data
   return(data_parsed)
 }
 
@@ -94,7 +101,7 @@ get_oral_data <- function(base_url, skip_records, take_records){
   return(results)
 }
 
-get_geo_ids <- function(url, selector_list){
+get_geo_ids <- function(url, selector_list, df){
   # Create driver
   rD <- rsDriver(browser=c("firefox"), verbose = F, 
                    port = netstat::free_port(random = TRUE), 
@@ -106,8 +113,8 @@ get_geo_ids <- function(url, selector_list){
   geography_ids <- list()
   
   # Loop through constituencies
-  for (constituency in member_constituencies$asking_member_from){
-    cat("Getting data for ", constituency, "\n")
+  for (curr_constituency in df$constituency){
+    cat("Getting data for ", curr_constituency, "\n")
     
     #navigate to homepage
     driver$navigate(url)
@@ -135,7 +142,7 @@ get_geo_ids <- function(url, selector_list){
         )
     
     # Send the constituency name into the search bar
-    search_box$sendKeysToElement(list(constituency))
+    search_box$sendKeysToElement(list(curr_constituency))
     
     # Wait for options to pop up
     Sys.sleep(2)
@@ -156,7 +163,7 @@ get_geo_ids <- function(url, selector_list){
           element_found <- TRUE
         },
         error = function(e) { # If the element is not found
-          cat("Trying ", constituency, " again\n")
+          cat("Trying ", curr_constituency, " again\n")
           
           # Add a pause
           Sys.sleep(2)
@@ -183,46 +190,74 @@ get_geo_ids <- function(url, selector_list){
     geography_ids <- c(geography_ids, geo_id)
   }
   
+  # Close the driver
   driver$close()
   
+  # Return the geo ids
   return(geography_ids)
 }
 
 get_region <- function(link_texts) {
+  
+  # Iterate through each link_text in the provided vector
   for (link_text in link_texts) {
+    
+    # Check if "England" is present in the current link_text
     if ("England" %in% link_text) {
-      return("England")
-    } else if ("Scotland" %in% link_text) {
-      return("Scotland")
-    } else if ("Northern Ireland" %in% link_text) {
-      return("Northern Ireland")
-    } else if ("Wales" %in% link_text) {
-      return("Wales")
+      return("England")  # Return "England" if found
+    } 
+    # Check if "Scotland" is present in the current link_text
+    else if ("Scotland" %in% link_text) {
+      return("Scotland")  # Return "Scotland" if found
+    } 
+    # Check if "Northern Ireland" is present in the current link_text
+    else if ("Northern Ireland" %in% link_text) {
+      return("Northern Ireland")  # Return "Northern Ireland" if found
+    } 
+    # Check if "Wales" is present in the current link_text
+    else if ("Wales" %in% link_text) {
+      return("Wales")  # Return "Wales" if found
     }
   }
-  return(NA)  # If none of the regions are found
+  
+  # If none of the regions are found, return NA
+  return(NA)
 }
 
 get_regions <- function(df){
+  
+  # Define the base URL for constructing complete URLs
   base_url <- 'https://www.ons.gov.uk/visualisations/areas/'
-
+  
+  # Initialize an empty vector to store the regions
   regions <- c()
   
+  # Iterate through each constituency_id in the geo_ids column of the df
   for (constituency_id in df$geo_ids){
+    
+    # Print a message indicating the data retrieval process
     cat("Getting data for ", constituency_id, "\n")
     
+    # Construct the complete URL
     url <- paste0(base_url, constituency_id, "/")
     
+    # Read the HTML content from the constructed URL
     html_content <- read_html(url)
     
+    # Extract all link texts from the HTML content using the get_all_links function
     link_data <- get_all_links(html_content)
   
+    # Extract the link_texts component from the link_data
     link_data$link_texts
     
-    region <- get_region(link_data)
+    # Use the get_region function to identify the region based on link_texts
+    region <- get_region(link_data$link_texts)
     
+    # Append the identified region to the regions vector
     regions <- c(regions, region)
   }
+  
+  # Return the vector containing the identified regions for each constituency
   return(regions)
 }
 
@@ -247,6 +282,8 @@ get_all_links <- function(html){ # Gets all links from the input HTML
 # Create Functions
 #=========================================================
 create_written_df_row <- function(element){
+  
+  # Create a new row using the tibble function with specified column values
   new_row <- tibble(
     asking_member_id = element$value$askingMemberId,  
     asking_member_name = element$value$askingMember$name,
@@ -254,10 +291,14 @@ create_written_df_row <- function(element){
     asking_member_from = element$value$askingMember$memberFrom,
     answering_body_name = element$value$answeringBodyName
   )
+  
+  # Return the newly created row as a tibble
   return(new_row)
 }
 
 create_oral_df_row <- function(element){
+  
+  # Create a new row using the tibble function with specified column values
   new_row <- tibble(
     asking_member_id = element$AskingMemberId,  
     asking_member_name = element$AskingMember$Name,
@@ -265,6 +306,8 @@ create_oral_df_row <- function(element){
     asking_member_from = element$AskingMember$Constituency,
     answering_body_name = element$AnsweringBody
   )
+  
+  # Return the newly created row as a tibble
   return(new_row)
 }
 
@@ -303,7 +346,9 @@ process_questions <- function(df){
              asking_member_party, 
              asking_member_from, 
              health_welfare_proportion, 
-             economic_proportion))
+             economic_proportion)) %>%
+    
+    rename(constituency = asking_member_from)
   
   return (df_processed)
 }
@@ -331,10 +376,14 @@ database = 'database/parliament_data.db'
 ```
 
 ```{r eval=FALSE}
+#=========================================================
+# Get Written Question Data
+#=========================================================
+
 # Set the base URL for the written questions API with specific parameters
 written_base_url <- paste0('https://questions-statements-api.parliament.uk/',
                            'api/writtenquestions/questions?', 
-                           'tabledWhenFrom=2022-01-01&tabledWhenTo=2022-12-31',
+                           'tabledWhenFrom=2021-01-01&tabledWhenTo=2022-12-31',
                            '&includeWithdrawn=true&expandMember=true',
                            '&answeringBodies=17&answeringBodies=14&answeringBodies=214',
                            '&answeringBodies=202&answeringBodies=29',
@@ -351,10 +400,14 @@ written_df <- get_written_data(written_base_url,
                                written_skip_records,
                                written_take_records)
 
+#=========================================================
+# Get Oral Question Data
+#=========================================================
+
 # Set the base URL for the oral questions API with specific parameters
 oral_base_url <- paste0('https://oralquestionsandmotions-api.parliament.uk',
                         '/oralquestions/list?',
-                        'parameters.answeringDateStart=2022-01-01',
+                        'parameters.answeringDateStart=2021-01-01',
                         '&parameters.answeringDateEnd=2022-12-31',
                         '&parameters.answeringBodyIds=17&parameters.answeringBodyIds=14',
                         '&parameters.answeringBodyIds=214&parameters.answeringBodyIds=202',
@@ -371,16 +424,29 @@ oral_df <- get_oral_data(oral_base_url,
                          oral_skip_records,
                          oral_take_records)
 
+#=========================================================
+# Process Question Data
+#=========================================================
+
 # Combine written and oral question data 
 all_questions_df <- rbind(written_df, oral_df)
 
 all_questions_processed <- process_questions(all_questions_df)
 
+# Remove questions from Members who were removed from office mid-year
+values_to_remove <- c("Neil Parish", "Kate Green", "Sir David Amess",
+                      "Mr Owen Paterson", "Jack Dromey", "Neil Gray",
+                      "Tracy Brabin", "Mike Hill", "Imran Ahmad Khan")
+
+# Remove values
+questions_filtered <- all_questions_processed[
+  !all_questions_processed$asking_member_name %in% values_to_remove, ]
+
 # Connect to the SQLite database
 db <- dbConnect(RSQLite::SQLite(), database)
 
 # Write the processed data into the database
-dbWriteTable(db, "member_details", all_questions_processed)
+dbWriteTable(db, "member_details", questions_filtered)
 
 # Disconnect from the database
 dbDisconnect(db)
@@ -389,129 +455,174 @@ dbDisconnect(db)
 
 ### Introduction
 
-Oral and written questions enable Members of Parliament (MPs) in the House of Commons to scrutinize the government's actions and policies. In this investigation, I aim to answer the following questions:
+In the realm of parliamentary scrutiny, where oral and written questions empower Members of Parliament (MPs) to delve into governmental actions and policies, this investigation seeks to unravel the dynamics shaping their interrogations. Two key questions guide this exploration:
 
-- Does party affiliation influence the focus of MPs' questions in the House of Commons? We will focus specifically on written and oral questions related to health and welfare vs. economic questions tabled and answered in 2022.
+- Does party affiliation influence the focus of MPs' questions in the House of Commons? 
+  + This research focuses on written and oral inquiries pertaining to health and welfare versus economic matters tabled and answered from 2021-2022.
 
-- To what extent do variations in MPs' rates of posing questions about health and welfare versus economic matters reflect regional disparities in their constituencies' overall health and employment statuses? This inquiry aims to investigate whether party affiliation remains the primary determinant of MPs' questioning patterns or if Members of Parliament demonstrate responsiveness to the specific needs of their constituents. In essence, does the questioning behavior align more with party conventions, or does it genuinely mirror the pressing concerns of the communities they represent?
+- To what degree do variations in MPs' rates of posing questions about health and welfare versus economic issues mirror regional disparities in their constituencies' broader health and economic landscapes? 
+  + This inquiry delves into whether party affiliation remains the predominant force steering MPs' questioning patterns or if Members of Parliament reveal a nuanced responsiveness to the unique needs of their constituents. Essentially, we scrutinize whether questioning behavior aligns more with party conventions or genuinely reflects the urgent concerns of the communities they represent.
+
 
 ### Data
 
-I collected data from the [UK Parliament API](https://developer.parliament.uk/) and the (Office for National Statistics)[https://www.ons.gov.uk/] to do this analysis. 
+I collected data from the [UK Parliament API](https://developer.parliament.uk/), encompassing 36,452 written and oral questions posed by 554 Members of Parliament between January 2021 and December 2022. To discern the nature of these questions—whether they pertained to health and welfare or economic matters—I selectively included questions answered by specific Answering Bodies. Economic questions were identified through responses from the Department for Business and Trade, Department for International Trade, and the Treasury. While the Department of Treasury is the primary entity for financial and economic policy, including the other two ensures a more comprehensive analysis of "economic issues," as they also support businesses in the UK.
 
-For the UK Parliament API, I collected data on 562 written and oral questions from Members of Parliament. To understand which questions were about health and welfare vs economic, I only included questions that were answered by specific Answering Bodies to classify whether a question was about health,  welfare or economic issues. Questions answered by the Department for Business and Trade, Department for International Trade, and the Treasury  were counted as economic questions while questions answered by the Department for Work and Pensions and the Department of Health and Social Care were classified as health and welfare questions. Each time a question was answered by the answering body, 1 additional question was added to the MP's total count and I found the proportion of economic questions vs health and welfare questions for each MP. 
+Questions answered by the Department for Work and Pensions and the Department of Health and Social Care were categorized as health and welfare questions. The exclusion of other governmental bodies from the analysis is deliberate, as their primary focus is not on health, welfare, or economic issues. This strategic narrowing of scope mitigates the risk of over-including irrelevant questions in a text analysis based on keywords like "health," "welfare," or "economic."
 
-From the Parliamentary API, each member had data on the parlaimentary constituency they represented. To get the region each constituency was a apart of, I collected data from the Office of National Statistics to better highlight the difference between constituencies in Wales vs. England on the map. I also collected data on the general health of each constituency as well as their economic activity. I would expect constituencies with lower levels of general health to be aligned with the party that is asking more questions about health and welfare. I would also expect constituencies with higher levels of economic activity to be associated with the party that asks more questions about economic issues. 
+Regional context was obtained from the (Office for National Statistics)[https://www.ons.gov.uk/], aligning constituencies with regions. The analysis aims to explore if constituencies with lower health levels align with health-welfare-focused parties and if higher economic activity aligns with parties addressing economic issues.
 
-I excluded questions by members who represented Scottish and Irish constituencies because analysis on the general health and economic activity of these areas were not readily available. Further research could explore these regions to get a more holistic view of this topic in the UK.
+I excluded questions from MPs representing Scottish and Irish constituencies due to limited data on the general health and economic activity of these areas. 9 members were removed who left office mid-year so this analysis only includes the most recent members in office.
 
-## Analysis
+Table 1 shows the number of Labour and Conservative party members we collected data on during the 2021-2022 period.
 
-As seen in Figure 1. Members apart of the Labour Party asked a higher proportion of questions about health and welfare in 2022. Members of the Labour party whose health and welfare questions were less than 30% of their questions were outliers, while members of the conservative party had a wider range while some members asking no questions about health and welfare in any of their questions while also having a lower average of questions about health and welfare and a wider range between their 25th percentile and 75th percentile.
+```{r, echo = TRUE}
+db <- dbConnect(RSQLite::SQLite(), database)
 
-We can see in Figure 2 that members of the conservative party had a higher proportion of questions about economic issues compared to all other parties.
+data <- dbGetQuery(db,
+           "SELECT * 
+           FROM member_details")
 
-However, it is interesting to note that all parties have similar levels of asking questions about health, welfare and economic issues with economic issues being asked at much lower percentages compared to health and welfare questions. 
+dbDisconnect(db)
 
-```{r}
+show_data <- data %>%
+  group_by(asking_member_party) %>%  
+  summarise(
+    Count = n()  
+  ) %>%
+  rename(Party = asking_member_party)
+
+knitr::kable(show_data, caption = "Table 1: Number of members in each party")
+```
+
+
+```{r, eval= FALSE}
+#=========================================================
+# Get Geo Data
+#=========================================================
+
 db <- dbConnect(RSQLite::SQLite(), database)
 
 member_constituencies <- dbGetQuery(db,
            "SELECT asking_member_name, 
-           asking_member_from, 
+           constituency, 
            asking_member_party, 
            health_welfare_proportion, 
            economic_proportion 
            FROM member_details")
 
-member_constituencies <- member_constituencies %>%
-  mutate(asking_member_party = ifelse(
-    asking_member_party %in% c("Conservative", 
-                               "Labour",
-                               "Scottish National Party"),
-    asking_member_party,
-    "Other")) 
+dbDisconnect(db)
 
-ggplot(member_constituencies, aes(x = asking_member_party, y = health_welfare_proportion)) +
-  geom_boxplot() +
-  labs(title = "Percentage of Questions asked about Health and Welfare",
-       x = "Asking Member Party", y = "Percentage") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
-  theme_minimal()
-
-ggplot(member_constituencies, aes(x = asking_member_party, y = economic_proportion)) +
-  geom_boxplot() +
-  labs(title = "Percentage of Questions asked about Economic Topics",
-       x = "Asking Member Party", y = "Percentage") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
-  theme_minimal()
-  
-```
-
-
-
-```{r, eval=FALSE}
-# Remove questions from Members who were removed from office mid-year
-values_to_remove <- c("Neil Parish", "Kate Green")
-
-# Remove values
-member_constituencies <- member_constituencies[
-  !member_constituencies$asking_member_name %in% values_to_remove, ]
-
+# Define search box Xpath
 search_box_path <- list('//*[@id="search"]')
 names(search_box_path) <- "search_box"
 
+# Define homepage url
 url <- "https://www.ons.gov.uk/visualisations/areas/"
 
-geography_ids <- get_geo_ids(url, search_box_path)
+# Geo geography ids for each constituency
+geography_ids <- get_geo_ids(url, search_box_path, member_constituencies)
 
 # Apply the function to each element in the list
 cleaned_geo_ids <- lapply(geography_ids, clean_geo_id)
 
+# Add geo ids to member constituencies
 member_constituencies$geo_ids <- unlist(cleaned_geo_ids)
 
+# Add regions to member constituencies
 member_constituencies$region <- get_regions(member_constituencies)
 
+# Filter only to constituencies in England and Wales
 member_constituencies_filtered <- member_constituencies %>%
   subset(region %in% c("England", "Wales"))
-  
+
+parties_clean <- member_constituencies_filtered %>%
+  mutate(asking_member_party = ifelse(
+    asking_member_party %in% c("Conservative", 
+                               "Labour"),
+    asking_member_party,
+    "Other")) %>%
+  select (-geo_ids)
+
 # Connect to the SQLite database
 db <- dbConnect(RSQLite::SQLite(), database)
 
-# Write the processed data into the database
-dbWriteTable(db, "member_details", 
-             member_constituencies_filtered, 
-             overwrite = TRUE)
+# Write geo data into the database
+dbWriteTable(db, "member_details", parties_clean, overwrite = TRUE)
 
 # Disconnect from the database
 dbDisconnect(db)
 
 ```
 
-```{r}
+## Analysis
+
+*Question #1 : Does party affiliation influence the focus of MPs' questions in the House of Commons?*
+
+In the context of questions asked to these answering bodies, the answer is yes.
+
+In questions to specific Answering Bodies, party affiliation does influence questioning focus. Figures 1 and 2 show Labour's higher median percentage (around 81%) of questions related to health and welfare, while Conservatives lead in economic issues with a median of 33%. Labour exhibits a narrower range, emphasizing a consistent focus on health and welfare. Conversely, Conservatives show a broader spectrum, reflecting varied questioning levels.
+
+```{r, include=FALSE,results='hide',fig.keep='all'}
+#=========================================================
+# Box Plots
+#=========================================================
+
 # Connect to the SQLite database
 db <- dbConnect(RSQLite::SQLite(), database)
 
-member_constituencies <- dbGetQuery(db,
-           "SELECT asking_member_name, 
-           asking_member_from, 
-           asking_member_party, 
+boxplot_data <- dbGetQuery(db,
+           "SELECT asking_member_party, 
            health_welfare_proportion, 
-           economic_proportion,
+           economic_proportion 
+           FROM member_details")
+
+# Disconnect from the database
+dbDisconnect(db)
+
+ggplot(boxplot_data, aes(x = asking_member_party, y = health_welfare_proportion)) +
+  geom_boxplot() +
+  labs(title = "Figure 1 \n Percentage of Questions asked about Health and Welfare",
+       x = "Asking Member Party", y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
+  theme_minimal()
+
+ggplot(boxplot_data, aes(x = asking_member_party, y = economic_proportion)) +
+  geom_boxplot() +
+  labs(title = "Figure 2 \n Percentage of Questions asked about Economic Topics",
+       x = "Asking Member Party", y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
+  theme_minimal()
+  
+```
+
+```{r}
+#=========================================================
+# Create Maps
+#=========================================================
+
+# Connect to the SQLite database
+db <- dbConnect(RSQLite::SQLite(), database)
+
+map_data <- dbGetQuery(db,
+           "SELECT constituency, 
+           asking_member_party,
            region
            FROM member_details")
 
-member_constituencies <- member_constituencies %>%
-  mutate(asking_member_from = ifelse(asking_member_from == "Weston-super-Mare",
+member_constituencies <- map_data %>%
+  mutate(asking_member_from = ifelse(constituency == "Weston-super-Mare",
                                      "Weston-Super-Mare",
-                                     asking_member_from))
+                                     constituency))
 
 # Disconnect from the database
 dbDisconnect(db)
 
 general_health <- read_csv("data/RM044-2021-2-filtered-2023-12-29T15_14_29Z.csv")
+
+economic_activity <- read_csv("data/TS066-2021-6-filtered-2024-01-05T11_06_34Z.csv")
 
 general_health_processed <- general_health %>%
   group_by(`Westminster Parliamentary constituencies`) %>%
@@ -524,11 +635,25 @@ general_health_processed <- general_health %>%
   ) %>%
   ungroup()
 
-health_data <- left_join(member_constituencies,
+economic_processed <- economic_activity %>%
+  group_by(`Westminster Parliamentary constituencies`) %>%
+  summarise(
+    economic_activity_proportion = sum(Observation[
+      grepl("Economically active", `Economic activity status (20 categories)`)]) /
+      sum(Observation)
+  ) %>%
+  ungroup()
+
+health_data <- left_join(map_data,
                          general_health_processed,
-                         by = c("asking_member_from" = "Westminster Parliamentary constituencies"))
+                         by = c("constituency" = "Westminster Parliamentary constituencies"))
+
+health_economic_data <- left_join(health_data,
+                         economic_processed,
+                         by = c("constituency" = "Westminster Parliamentary constituencies"))
 
 ```
+
 
 ```{r fig.width = 13, fig.height = 13}
 england_wales <- st_as_sf(ne_countries(geounit = c("England", 
@@ -541,185 +666,88 @@ constituencies_shp <- read_sf(paste0("data/",
                               "PCON_DEC_2021_UK_BFE.shp"))
 
 constituencies_shp_merged <- constituencies_shp %>%
-  left_join(disability_data, 
-            by = join_by(PCON21NM == asking_member_from)) %>%
+  left_join(health_economic_data, 
+            by = join_by(PCON21NM == constituency)) %>%
   
   #remove rows that are not a aprt of our analysis
   filter(!is.na(region))
 
 parties <- tm_shape(constituencies_shp_merged) +
   tm_borders(lwd=0.3) +
-  tm_fill(col = "asking_member_party", palette = c("lightblue", "lightcoral", "grey80")) + +
-  tm_layout(title = "Constituency Map") +
+  tm_fill(col = "asking_member_party", palette = c("lightblue", "lightcoral", "grey80")) +
+  tm_layout(title = "Figure 3 \n Constituency Map by Party") +
   # Highlight Wales with a thicker border
   tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
   tm_borders(lwd=1)
 
-heallth_map <- tm_shape(constituencies_shp_merged) +
+health_map <- tm_shape(constituencies_shp_merged) +
   tm_borders() +
   tm_fill(
     col = "good_health_proportion",
-    palette = "Blues",  # Choose a color palette
+    palette = "Greys",  # Choose a color palette
     style = "cont",
     alpha = 1
   ) +
-  tm_layout(title = "Constituency Map") +
+  tm_layout(title = "Figure 4 \n Constituency Map by proportion of population in Good Health") +
   tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
   tm_borders(lwd=1)
 
-tmap_arrange(parties, heallth_map, ncol = 2)
+economic_map <- tm_shape(constituencies_shp_merged) +
+  tm_borders() +
+  tm_fill(
+    col = "economic_activity_proportion",
+    palette = "Greens",  # Choose a color palette
+    style = "cont",
+    alpha = 1
+  ) +
+  tm_layout(title = "Figure 5 \n Constituency Map by Economic Activity Level") +
+  tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
+  tm_borders(lwd=1)
+
+```
+
+*Question #2 : To what degree do variations in MPs' rates of posing questions about health and welfare versus economic issues mirror regional disparities in their constituencies' broader health and economic landscapes?*
+
+Figure 3 illustrates party representation across regions. Figures 4 and 5, depicting health and economic indicators, showing a concentration of higher economic activity and general health levels around greater London, indicating potential alignment. However, Tables 2 and 3 reveal similar health and economic levels for Conservative and Labour constituencies, suggesting that these indicators may not strongly correlate with MPs' questioning behavior. This raises questions about the true reflection of constituency needs in MPs' behavior and the influence of external pressures.
+
+The analysis sheds light on the nuanced relationship between MPs' party affiliation, questioning behavior, and regional disparities. While party affiliation influences questioning focus, regional health and economic indicators may not be strong predictors. This prompts further exploration into the multifaceted factors shaping MPs' behavior and the complex interplay between party conventions and constituency needs. The findings highlight the need for a comprehensive understanding of parliamentary dynamics, considering both national party dynamics and local factors influencing MPs' representation of their constituents.
+
+```{r}
+parties
+
+```
+
+```{r}
+tmap_arrange(health_map, economic_map, ncol = 2)
+
 ```
 
 
+```{r}
+summary_table_labour <- health_economic_data %>%
+  filter(asking_member_party == "Labour") %>%  
+  summarise(
+    good_health_mean = mean(good_health_proportion),
+    good_health_standard_deviation = sd(good_health_proportion),
+    economic_activity_mean = mean(economic_activity_proportion),
+    economic_activity_deviation = sd(economic_activity_proportion),
+    Count = n()  
+  )
 
-```{r, eval=FALSE}
-library("nomisr")
+# Summary table for Conservative party
+summary_table_conservative <- health_economic_data %>%
+  filter(asking_member_party == "Conservative") %>% 
+  summarise(
+    good_health_mean = mean(good_health_proportion, na.rm = TRUE),
+    good_health_standard_deviation = sd(good_health_proportion, na.rm = TRUE),
+    economic_activity_mean = mean(economic_activity_proportion, na.rm = TRUE),
+    economic_activity_deviation = sd(economic_activity_proportion, na.rm = TRUE),
+    Count = n()  
+  )
 
-test <- nomis_get_data(
-  id = "NM_2055_1",
-  measures = 20301,
-  time = "2022",
-  geography = "E00083860"
-)
+knitr::kable(summary_table_labour, caption = "Table 2: Labour Party Summary Statistics")
 
-View(geography_nomis)
-
-geography_nomis <- nomis_codelist("NM_2055_1", "geography")
-
-geography_nomis_w_type <- nomis_get_metadata(id= "NM_2055_1", concept = "geography", type = "TYPE460")
-
-metadata <- nomis_get_metadata("NM_2055_1")
-
-View(geography_nomis)
-
-data_info_w_type <- nomis_data_info("NM_2055_1")
-
-View(merged_data_parties)
-
-
-
-
-
-
-
-
-
-# Nomis API endpoint
-url <- "http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json"
-
-# Example geography code for a Westminster Parliamentary constituency (replace with the actual code)
-constituency_code <- "E14001048"
-
-# Example measures code (replace with the actual code)
-measures_code <- "20301"
-
-# Query parameters
-query_params <- list(
-  geography = constituency_code,
-  measures = measures_code
-)
-
-# Make the API request
-response <- GET(url, query = query_params)
-
-# Parse the JSON response
-json_data <- content(response, "parsed")
-
-
-
-
-
-
-
-
-
-#set base url
-base_url <- 'http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json?geography='
-
-# Url suffix very good health
-url_suffix_very_good <- '&measures=20301&c2021_health_6=1'
-  
-# Url suffix good health
-url_suffix_good <- '&measures=20301&c2021_health_6=2'
-
-datasets <- GET("http://www.nomisweb.co.uk/api/v01/dataset/def.sdmx.json?search=name-TS037*")
-
-dataset_parsed<- content(datasets, "parsed")
-
-geographies <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json?")
-
-geographies_parsed <- content(geographies, "parsed")
-
-geographies_df <- tibble(id = as.character(),
-                      name = as.character())
-
-for (i in seq_along(geographies_parsed$dimension$geography$category$label)) {
-  geo_name <- names(geographies_parsed$dimension$geography$category$label)[i]
-  geo_label <- geographies_parsed$dimension$geography$category$label[[i]]
-  
-  new_row <- tibble(id = geo_name, name = geo_label)
-  
-  geographies_df <- bind_rows(geographies_df, new_row)
-  
-}
-
-member_geography_df <- merge(member_constituencies, 
-                             geographies_df, 
-                             by.x = "asking_member_from", 
-                             by.y = "id", 
-                             all.x = TRUE)
-
-# get list options
-health_options <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1/geography.def.sdmx.json?")
-
-options_parsed <- content(health_options, "parsed")
-
-#get actual data
-general_health <- GET("http://www.nomisweb.co.uk/api/v01/dataset/NM_2055_1.jsonstat.json?geography=2092957703&measures=20301&c2021_health_6=1")
-
-health_parsed <- content(general_health, "parsed")
-
-as.numeric(health_parsed$value[[1]])
-
-#gender
-#where they are from
-```
-
-
-This document contains the necessary commands and layout to meet the formatting requirements for MY472. You should use the template.Rmd file as the basis for your own answers to the assigned exercises.
-
-## Formatting requirements
-
-* You must present all results in full sentences, as you would in a report or academic piece of writing
-  
-  * If the exercise requires generating a table or figure, you should include at least one sentence introducing and explaining it. E.g. "The table below reports the counts of Wikipedia articles mentioning the LSE, by type of article."
-
-* Unless stated otherwise, all code used to answer the exercises should be included as a code appendix at the end of the script. This formatting can be achieved by following the guidance in this template file.
-
-* All code should be annotated with comments, to help the marker understand what you have done
-
-* Your output should be replicable. Any result/table/figure that cannot be traced back to your code will not be marked
-
-## Example of in-line figures without code
-
-For those interested, we achieve the formatting requirements in two-steps: 1) in the `setup` chunk, we set `knitr::opts_chunk$set(echo = FALSE)` so that code is not included (echoed) by default in code chunks; 2) we add a specific chunk at the end of the file to collect and print *all* the code in the Rmarkdown file. Do not delete the final code chunk from the template!
-
-For example, below we use a code chunk to generate random data and include a scatter plot in-line. The code used to generate this chart is only reported at the end of the document. 
-
-```{r plot_example}
-set.seed(89) # set a seed for R's psuedo-randomiser, for replicability.
-x <- rnorm(100) # randomly draw 100 obs from normal distribution, save as object
-y <- rnorm(100) 
-plot(x,y) # two-way scatterplot using R's default plotting
-```
-
-In specific instances, however, you may be directed to report your code in-line (or you may want to do this to illustrate a specific point). In these cases, we can override the default behaviour by adding the chunk option `echo = TRUE` to a specific R chunk. When `echo=TRUE`, your code is presented in-line with any output displayed afterwards. The same code will also be included in the appendix at the bottom of the document (which is fine).
-
-```{r echo_example, echo=TRUE}
-# {[language] [chunk_name], [chunk_options]}
-# here we use echo=TRUE to override our global options and make the chunk appear exactly here. 
-
-print("This code chunk is visible in this section.")
+knitr::kable(summary_table_conservative, caption = "Table 3: Conservative Party Summary Statistics")
 ```
 
 ## Appendix: All code in this assignment
