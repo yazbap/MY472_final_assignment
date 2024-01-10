@@ -1,6 +1,6 @@
 ---
 title: "Assignment 4"
-date: "January 10, 2023"
+date: "January 10, 2024"
 output: html_document
 ---
 
@@ -19,6 +19,9 @@ library("rvest")
 library("sf")
 library("rnaturalearth")
 library("tmap")
+library("gridExtra")
+library("ggplot2")
+
 ```
 
 ```{r}
@@ -345,7 +348,9 @@ process_questions <- function(df){
     select(c(asking_member_name, 
              asking_member_party, 
              asking_member_from, 
-             health_welfare_proportion, 
+             health_welfare_count,
+             economic_count,
+             health_welfare_proportion,
              economic_proportion)) %>%
     
     rename(constituency = asking_member_from)
@@ -373,6 +378,7 @@ clean_geo_id <- function(input_string) {
 ```{r}
 # Set the path to the SQLite database
 database = 'database/parliament_data.db'
+
 ```
 
 ```{r eval=FALSE}
@@ -438,80 +444,13 @@ values_to_remove <- c("Neil Parish", "Kate Green", "Sir David Amess",
                       "Mr Owen Paterson", "Jack Dromey", "Neil Gray",
                       "Tracy Brabin", "Mike Hill", "Imran Ahmad Khan")
 
-# Remove values
-questions_filtered <- all_questions_processed[
+# Remove values of members who left mid-year
+member_constituencies <- all_questions_processed[
   !all_questions_processed$asking_member_name %in% values_to_remove, ]
 
-# Connect to the SQLite database
-db <- dbConnect(RSQLite::SQLite(), database)
-
-# Write the processed data into the database
-dbWriteTable(db, "member_details", questions_filtered)
-
-# Disconnect from the database
-dbDisconnect(db)
-
-```
-
-### Introduction
-
-In the realm of parliamentary scrutiny, where oral and written questions empower Members of Parliament (MPs) to delve into governmental actions and policies, this investigation seeks to unravel the dynamics shaping their interrogations. Two key questions guide this exploration:
-
-- Does party affiliation influence the focus of MPs' questions in the House of Commons? 
-  + This research focuses on written and oral inquiries pertaining to health and welfare versus economic matters tabled and answered from 2021-2022.
-
-- To what degree do variations in MPs' rates of posing questions about health and welfare versus economic issues mirror regional disparities in their constituencies' broader health and economic landscapes? 
-  + This inquiry delves into whether party affiliation remains the predominant force steering MPs' questioning patterns or if Members of Parliament reveal a nuanced responsiveness to the unique needs of their constituents. Essentially, we scrutinize whether questioning behavior aligns more with party conventions or genuinely reflects the urgent concerns of the communities they represent.
-
-
-### Data
-
-I collected data from the [UK Parliament API](https://developer.parliament.uk/), encompassing 36,452 written and oral questions posed by 554 Members of Parliament between January 2021 and December 2022. To discern the nature of these questions—whether they pertained to health and welfare or economic matters—I selectively included questions answered by specific Answering Bodies. Economic questions were identified through responses from the Department for Business and Trade, Department for International Trade, and the Treasury. While the Department of Treasury is the primary entity for financial and economic policy, including the other two ensures a more comprehensive analysis of "economic issues," as they also support businesses in the UK.
-
-Questions answered by the Department for Work and Pensions and the Department of Health and Social Care were categorized as health and welfare questions. The exclusion of other governmental bodies from the analysis is deliberate, as their primary focus is not on health, welfare, or economic issues. This strategic narrowing of scope mitigates the risk of over-including irrelevant questions in a text analysis based on keywords like "health," "welfare," or "economic."
-
-Regional context was obtained from the (Office for National Statistics)[https://www.ons.gov.uk/], aligning constituencies with regions. The analysis aims to explore if constituencies with lower health levels align with health-welfare-focused parties and if higher economic activity aligns with parties addressing economic issues.
-
-I excluded questions from MPs representing Scottish and Irish constituencies due to limited data on the general health and economic activity of these areas. 9 members were removed who left office mid-year so this analysis only includes the most recent members in office.
-
-Table 1 shows the number of Labour and Conservative party members we collected data on during the 2021-2022 period.
-
-```{r, echo = TRUE}
-db <- dbConnect(RSQLite::SQLite(), database)
-
-data <- dbGetQuery(db,
-           "SELECT * 
-           FROM member_details")
-
-dbDisconnect(db)
-
-show_data <- data %>%
-  group_by(asking_member_party) %>%  
-  summarise(
-    Count = n()  
-  ) %>%
-  rename(Party = asking_member_party)
-
-knitr::kable(show_data, caption = "Table 1: Number of members in each party")
-```
-
-
-```{r, eval= FALSE}
 #=========================================================
 # Get Geo Data
 #=========================================================
-
-db <- dbConnect(RSQLite::SQLite(), database)
-
-member_constituencies <- dbGetQuery(db,
-           "SELECT asking_member_name, 
-           constituency, 
-           asking_member_party, 
-           health_welfare_proportion, 
-           economic_proportion 
-           FROM member_details")
-
-dbDisconnect(db)
 
 # Define search box Xpath
 search_box_path <- list('//*[@id="search"]')
@@ -536,6 +475,7 @@ member_constituencies$region <- get_regions(member_constituencies)
 member_constituencies_filtered <- member_constituencies %>%
   subset(region %in% c("England", "Wales"))
 
+# Clean up party column
 parties_clean <- member_constituencies_filtered %>%
   mutate(asking_member_party = ifelse(
     asking_member_party %in% c("Conservative", 
@@ -548,22 +488,83 @@ parties_clean <- member_constituencies_filtered %>%
 db <- dbConnect(RSQLite::SQLite(), database)
 
 # Write geo data into the database
-dbWriteTable(db, "member_details", parties_clean, overwrite = TRUE)
+dbWriteTable(db, "member_details", parties_clean)
 
 # Disconnect from the database
 dbDisconnect(db)
 
 ```
 
+github repo: https://github.com/yazbap/MY472_final_assignment
+
+### Introduction
+
+In the realm of parliamentary scrutiny, where oral and written questions empower Members of Parliament (MPs) to delve into governmental actions and policies, this investigation seeks to unravel the dynamics shaping their interrogations. Two key questions guide this exploration:
+
+- Is party affiliation a characteristic that discriminates between MP's that tend to ask questions about health and welfare vs economic issues?
+  + This research focuses on written and oral inquiries pertaining to these topics tabled and answered from 2021-2022.
+
+- To what degree do variations in MPs' rates of posing questions about health and welfare versus economic issues mirror regional disparities in their constituencies' broader health and economic landscapes? 
+  + This inquiry explores whether MPs' questioning behavior is predominantly driven by party affiliation or genuinely reflects the urgent concerns of their constituents.
+
+### Data
+
+I collected data from the [UK Parliament API](https://developer.parliament.uk/), encompassing 36,452 written and oral questions posed by 563 Members of Parliament between January 2021 and December 2022. To discern the nature of these questions—whether they pertained to health and welfare or economic matters—I included questions answered by specific Answering Bodies. 
+
+Economic questions were identified through responses from the Department for Business and Trade, Department for International Trade, and the Treasury. While the Department of Treasury is the primary entity for financial and economic policy, including the other two ensures a more comprehensive analysis of "economic issues," as they also support businesses in the UK.
+
+Questions answered by the Department for Work and Pensions and the Department of Health and Social Care were categorized as health and welfare questions. I chose the former due to it being the biggest public service department in the UK delivering services like welfare. I chose the latter because they support ministers in leading the nation in health and social care policies.
+
+I obtained general health levels, economic activity levels, and regional context from the Office for National Statistics for each constituency. These two data points, general health, and economic activity levels, are pivotal in assessing whether MPs' questioning behavior aligns with the urgent concerns of the communities they represent. To ensure the integrity of the analysis, I excluded 68 MPs representing Scottish and Irish constituencies due to limited data availability for these areas. Additionally, 9 members who left office mid-year were removed. Consequently, the analysis includes only the most recent members in office in England and Wales, totaling 486 members, and establishing a 1-to-1 relationship between each member and their constituency. If a constituency is missing from Figures 3, 4 and 5, it means there was no data for that constituency in the time frame of this analysis.
+
+Table 1 shows the number of Labour and Conservative party members I collected data from as well as the number of questions each party asked. It should be noted while there are 77 more Conservative members than Labour party members in this analysis, Labour party members asked the majority of questions. The query from the database is also shown.
+
+```{r, echo = TRUE}
+# Connect to the SQLite database using the RSQLite package
+db <- dbConnect(RSQLite::SQLite(), database)
+
+# Retrieve all data from the "member_details" table in the SQLite database
+data <- dbGetQuery(db,
+           "SELECT * 
+           FROM member_details")
+
+# Disconnect from the SQLite database to free up resources
+dbDisconnect(db)
+
+# Perform data summarization:
+show_data <- data %>%
+  group_by(asking_member_party) %>%  # Group data by asking_member_party
+  
+  # Summarize the total number of health and welfare questions, economic questions, and count of members
+  summarise(
+    `Total Number of Health and Welfare Questions` = sum(health_welfare_count),
+    `Total Number of Economic Questions` = sum(economic_count),
+    Count = n()  
+  ) %>%
+  
+  mutate(
+    # Create a new column 'Total Questions' by summing health and welfare questions and economic questions
+    `Total Questions` = `Total Number of Health and Welfare Questions` + `Total Number of Economic Questions`
+  ) %>%
+  
+  # Rename the column asking_member_party to Party
+  rename(Party = asking_member_party) %>%
+  
+  # Select relevant columns (Party, Count, Total Questions)
+  select(Party, Count, `Total Questions`)
+
+# Display the summarized data in a formatted table using knitr::kable
+knitr::kable(show_data, caption = "Table 1: Number of members in each party")
+
+```
+
 ## Analysis
 
-*Question #1 : Does party affiliation influence the focus of MPs' questions in the House of Commons?*
+Figures 1 and 2 help us answer research question #1. Figure 1 shows the Labour party's higher median percentage (around 81%) of questions related to health and welfare, while Figure 2 shows Conservatives lead in questions about economic issues with a median of 33%. The Labour party also exhibits a narrower range in questioning behavior, emphasizing a consistent focus on how they question the government. Conversely, Conservatives show a broader spectrum, despite their overall lower level of questioning the government.
 
-In the context of questions asked to these answering bodies, the answer is yes.
+With this knowledge, this helps us delve deeper into question #2 in which we discern whether this reality reflects disparities in the communities these MP's represent.
 
-In questions to specific Answering Bodies, party affiliation does influence questioning focus. Figures 1 and 2 show Labour's higher median percentage (around 81%) of questions related to health and welfare, while Conservatives lead in economic issues with a median of 33%. Labour exhibits a narrower range, emphasizing a consistent focus on health and welfare. Conversely, Conservatives show a broader spectrum, reflecting varied questioning levels.
-
-```{r, include=FALSE,results='hide',fig.keep='all'}
+```{r fig.width = 13, fig.height = 7}
 #=========================================================
 # Box Plots
 #=========================================================
@@ -571,6 +572,7 @@ In questions to specific Answering Bodies, party affiliation does influence ques
 # Connect to the SQLite database
 db <- dbConnect(RSQLite::SQLite(), database)
 
+# Get boxplot data
 boxplot_data <- dbGetQuery(db,
            "SELECT asking_member_party, 
            health_welfare_proportion, 
@@ -580,22 +582,31 @@ boxplot_data <- dbGetQuery(db,
 # Disconnect from the database
 dbDisconnect(db)
 
-ggplot(boxplot_data, aes(x = asking_member_party, y = health_welfare_proportion)) +
-  geom_boxplot() +
-  labs(title = "Figure 1 \n Percentage of Questions asked about Health and Welfare",
-       x = "Asking Member Party", y = "Percentage") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
-  theme_minimal()
+# Create a boxplot for the percentage of questions asked about Health and Welfare
+health_welfare_box <- ggplot(boxplot_data, 
+                             aes(x = asking_member_party, 
+                                 y = health_welfare_proportion)) +
+  geom_boxplot() +  # Add a boxplot layer
+  labs(title = "Figure 1 \n Percentage of Questions asked\nabout Health and Welfare",  # Set plot title
+       x = "Asking Member Party", 
+       y = "Percentage") +  # Set axis labels
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Format y-axis as percentage
+  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +  # Format y-axis labels
+  theme_minimal()  # Use a minimal theme for the plot
 
-ggplot(boxplot_data, aes(x = asking_member_party, y = economic_proportion)) +
-  geom_boxplot() +
-  labs(title = "Figure 2 \n Percentage of Questions asked about Economic Topics",
-       x = "Asking Member Party", y = "Percentage") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
-  theme_minimal()
-  
+# Create a boxplot for the percentage of questions asked about Economic Topics
+economic_box <- ggplot(boxplot_data, 
+                       aes(x = asking_member_party, 
+                           y = economic_proportion)) +
+  geom_boxplot() +  # Add a boxplot layer
+  labs(title = "Figure 2 \n Percentage of Questions asked\nabout Economic Topics",  # Set plot title
+       x = "Asking Member Party", 
+       y = "Percentage") +  # Set axis labels
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Format y-axis as percentage
+  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +  # Format y-axis labels
+  theme_minimal()  # Use a minimal theme for the plot
+
+grid.arrange(health_welfare_box, economic_box, ncol=2)
 ```
 
 ```{r}
@@ -606,12 +617,14 @@ ggplot(boxplot_data, aes(x = asking_member_party, y = economic_proportion)) +
 # Connect to the SQLite database
 db <- dbConnect(RSQLite::SQLite(), database)
 
+# Get map data
 map_data <- dbGetQuery(db,
            "SELECT constituency, 
            asking_member_party,
            region
            FROM member_details")
 
+# Correct constituency to ensure correct table joinings
 member_constituencies <- map_data %>%
   mutate(asking_member_from = ifelse(constituency == "Weston-super-Mare",
                                      "Weston-Super-Mare",
@@ -624,6 +637,7 @@ general_health <- read_csv("data/RM044-2021-2-filtered-2023-12-29T15_14_29Z.csv"
 
 economic_activity <- read_csv("data/TS066-2021-6-filtered-2024-01-05T11_06_34Z.csv")
 
+# Calculate the proportion of respondents with good health in each constituency
 general_health_processed <- general_health %>%
   group_by(`Westminster Parliamentary constituencies`) %>%
   summarise(
@@ -635,6 +649,7 @@ general_health_processed <- general_health %>%
   ) %>%
   ungroup()
 
+# Calculate the proportion of economically active respondents in each constituency
 economic_processed <- economic_activity %>%
   group_by(`Westminster Parliamentary constituencies`) %>%
   summarise(
@@ -644,27 +659,33 @@ economic_processed <- economic_activity %>%
   ) %>%
   ungroup()
 
+# Merge processed health data with map_data based on the constituency column
 health_data <- left_join(map_data,
                          general_health_processed,
                          by = c("constituency" = "Westminster Parliamentary constituencies"))
 
+# Merge processed health and economic data with map_data based on the constituency column
 health_economic_data <- left_join(health_data,
-                         economic_processed,
-                         by = c("constituency" = "Westminster Parliamentary constituencies"))
+                                  economic_processed,
+                                  by = c("constituency" = "Westminster Parliamentary constituencies"))
+
 
 ```
 
 
-```{r fig.width = 13, fig.height = 13}
+```{r}
+# Get England and Wales shp data
 england_wales <- st_as_sf(ne_countries(geounit = c("England", 
                                         "Wales"),
                             type = "map_units"))
 
+# Get cosntituencies shp data
 constituencies_shp <- read_sf(paste0("data/",
                               "Westminster_Parliamentary_Constituencies_",
                               "Dec_2021_UK_BFE_2022_-7013535748659767197/",
                               "PCON_DEC_2021_UK_BFE.shp"))
 
+# Merge consitituency shp data with their health and economic statistics
 constituencies_shp_merged <- constituencies_shp %>%
   left_join(health_economic_data, 
             by = join_by(PCON21NM == constituency)) %>%
@@ -672,87 +693,149 @@ constituencies_shp_merged <- constituencies_shp %>%
   #remove rows that are not a aprt of our analysis
   filter(!is.na(region))
 
+# Create map for parties
 parties <- tm_shape(constituencies_shp_merged) +
   tm_borders(lwd=0.3) +
-  tm_fill(col = "asking_member_party", palette = c("lightblue", "lightcoral", "grey80")) +
-  tm_layout(title = "Figure 3 \n Constituency Map by Party") +
+  tm_fill(col = "asking_member_party", 
+          title = "Party",
+          palette = c("lightblue", "lightcoral", "grey80")) +
+  tm_layout(title = "Figure 3 \nConstituency Map by Party") +
   # Highlight Wales with a thicker border
   tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
-  tm_borders(lwd=1)
+  tm_borders(lwd=1.2)
 
+# Create map for health data
 health_map <- tm_shape(constituencies_shp_merged) +
   tm_borders() +
   tm_fill(
     col = "good_health_proportion",
+    title = "Percentage of constituents in Good Health",
     palette = "Greys",  # Choose a color palette
     style = "cont",
     alpha = 1
   ) +
-  tm_layout(title = "Figure 4 \n Constituency Map by proportion of population in Good Health") +
+  tm_layout(title = "Figure 4 \nConstituency Map by proportion of population in Good Health") +
   tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
-  tm_borders(lwd=1)
+  tm_borders(lwd=1.2)
 
+# Create map for economic data
 economic_map <- tm_shape(constituencies_shp_merged) +
   tm_borders() +
   tm_fill(
     col = "economic_activity_proportion",
+    title = "Percentage of Constituents who are Economically Active",
     palette = "Greens",  # Choose a color palette
     style = "cont",
     alpha = 1
   ) +
-  tm_layout(title = "Figure 5 \n Constituency Map by Economic Activity Level") +
+  tm_layout(title = "Figure 5 \nConstituency Map by Economic Activity Level") +
   tm_shape(constituencies_shp_merged[constituencies_shp_merged$region == "Wales", ]) +
-  tm_borders(lwd=1)
+  tm_borders(lwd=1.2)
 
 ```
 
-*Question #2 : To what degree do variations in MPs' rates of posing questions about health and welfare versus economic issues mirror regional disparities in their constituencies' broader health and economic landscapes?*
+Figure 3 illustrates party representation across England and Wales. Figures 4 and 5 depict the health and economic indicators mentioned in the Data section. Figures 4 and 5 show a concentration of higher economic activity and general health levels around the greater London area with these levels gradually decreasing as you move away from this area. While this hints at potential alignment with Labour party representation in that region, Figures 6 and 7 reveal similar average good health and economic activity levels for Conservative and Labour constituencies with the Labour party being slightly more economically diverse. This raises questions about the true reflection of constituency needs in MPs' behavior and the influence of external pressures.
 
-Figure 3 illustrates party representation across regions. Figures 4 and 5, depicting health and economic indicators, showing a concentration of higher economic activity and general health levels around greater London, indicating potential alignment. However, Tables 2 and 3 reveal similar health and economic levels for Conservative and Labour constituencies, suggesting that these indicators may not strongly correlate with MPs' questioning behavior. This raises questions about the true reflection of constituency needs in MPs' behavior and the influence of external pressures.
+In conclusion, while party affiliation discriminates questioning focus, regional health and economic indicators may not be strong factors that influence MP questioning behavior. This prompts further exploration into the multifaceted factors shaping MPs' behavior and how much constituent need shapes their focus.
 
-The analysis sheds light on the nuanced relationship between MPs' party affiliation, questioning behavior, and regional disparities. While party affiliation influences questioning focus, regional health and economic indicators may not be strong predictors. This prompts further exploration into the multifaceted factors shaping MPs' behavior and the complex interplay between party conventions and constituency needs. The findings highlight the need for a comprehensive understanding of parliamentary dynamics, considering both national party dynamics and local factors influencing MPs' representation of their constituents.
-
-```{r}
-parties
+```{r fig.width = 7, fig.height = 7}
+parties #show parties map
 
 ```
 
-```{r}
+```{r fig.width = 13, fig.height = 10}
+#arrange economic and health maps side by side
 tmap_arrange(health_map, economic_map, ncol = 2)
 
 ```
 
 
 ```{r}
-summary_table_labour <- health_economic_data %>%
-  filter(asking_member_party == "Labour") %>%  
-  summarise(
-    good_health_mean = mean(good_health_proportion),
-    good_health_standard_deviation = sd(good_health_proportion),
-    economic_activity_mean = mean(economic_activity_proportion),
-    economic_activity_deviation = sd(economic_activity_proportion),
-    Count = n()  
-  )
+#=========================================================
+# Create Plots
+#=========================================================
 
-# Summary table for Conservative party
-summary_table_conservative <- health_economic_data %>%
-  filter(asking_member_party == "Conservative") %>% 
-  summarise(
-    good_health_mean = mean(good_health_proportion, na.rm = TRUE),
-    good_health_standard_deviation = sd(good_health_proportion, na.rm = TRUE),
-    economic_activity_mean = mean(economic_activity_proportion, na.rm = TRUE),
-    economic_activity_deviation = sd(economic_activity_proportion, na.rm = TRUE),
-    Count = n()  
-  )
+# Calculate mean and standard deviation of economically active constituents for each party
+economically_active_mean_std <- health_economic_data %>%
+  
+  # For each group defined by 'asking_member_party'
+  group_by(asking_member_party) %>%
+  
+  # Calculate the mean and standard deviation of the economic activity proportions
+  summarise_at(vars(economic_activity_proportion), 
+               list(`Average Percentage of Economically Active Constituents`= ~mean(., 
+                                                                               na.rm = TRUE),
+                    `Economically Active Standard Deviation`= ~sd(.,
+                                                          na.rm = TRUE))) %>%
+  as.data.frame()
 
-knitr::kable(summary_table_labour, caption = "Table 2: Labour Party Summary Statistics")
+# Plot economically_active_mean_std
+economically_active_plot <- ggplot(economically_active_mean_std, 
+       aes(x=asking_member_party, 
+           y=`Average Percentage of Economically Active Constituents`)) +
+  
+  #Plot standard deviation
+  geom_errorbar(aes(ymin=`Average Percentage of Economically Active Constituents`-
+                      `Economically Active Standard Deviation`, 
+                    ymax=`Average Percentage of Economically Active Constituents`+
+                      `Economically Active Standard Deviation`), width=.3) +
+  
+  #Plot mean
+  geom_point(size=2) +
+  
+  #Set axes
+  labs(title = "Figure 7 \nMean and Standard Deviation\nfor Proportion of Economically Active Constituents",
+       x = "Asking Member Party", y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
+  
+  theme_minimal()
 
-knitr::kable(summary_table_conservative, caption = "Table 3: Conservative Party Summary Statistics")
+# Calculate mean and standard deviation of the health of constituents for each party
+good_health_mean_std <- health_economic_data %>%
+  
+  # For each group defined by 'asking_member_party'
+  group_by(asking_member_party) %>%
+  
+  # Calculate the mean and standard deviation of the good health proportions
+  summarise_at(vars(good_health_proportion), 
+               list(`Average Percentage of Constituents in Good Health`= ~mean(., 
+                                                                               na.rm = TRUE),
+                    `Good Health Standard Deviation`= ~sd(.,
+                                                          na.rm = TRUE))) %>%
+  as.data.frame()
+
+# Plot good_health_mean_std
+good_health_plot <- ggplot(good_health_mean_std, 
+       aes(x=asking_member_party, 
+           y=`Average Percentage of Constituents in Good Health`)) +
+  
+  # Plot standard deviation
+  geom_errorbar(aes(ymin=`Average Percentage of Constituents in Good Health`-
+                      `Good Health Standard Deviation`, 
+                    ymax=`Average Percentage of Constituents in Good Health`+
+                      `Good Health Standard Deviation`), width=.3) +
+  
+  # Plot mean
+  geom_point(size=2) +
+  
+  #Set axes
+  labs(title = "Figure 6 \nMean and Standard Deviation\nfor Proportion of Constituents in Good Health",
+       x = "Asking Member Party", y = "Percentage") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(labels = function(x) paste0(sprintf("%.0f", x*100), "%")) +
+  
+  theme_minimal()
+
 ```
+
+```{r fig.width = 13, fig.height = 7}
+grid.arrange(good_health_plot, economically_active_plot, ncol=2)
+
+```
+
 
 ## Appendix: All code in this assignment
 
 ```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE} 
-# this chunk generates the complete code appendix. 
-# eval=FALSE tells R not to run (``evaluate'') the code here (it was already run before).
 ```
